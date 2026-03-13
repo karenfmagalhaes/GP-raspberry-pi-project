@@ -2,3 +2,19 @@
 __pycache__/
 *.pyc
 .env
+
+# Python
+__pycache__/
+*.pyc
+
+# Local project config
+config.json
+spotify_token.json
+.env
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
