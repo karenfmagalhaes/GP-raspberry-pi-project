@@ -1,0 +1,8 @@
+{
+  "open_palm": "play",
+  "fist": "pause",
+  "three_fingers": "next_track",
+  "peace": "previous_track",
+  "thumbs_up": "volume_up",
+  "thumbs_down": "volume_down"
+}
