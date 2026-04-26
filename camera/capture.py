@@ -1,15 +1,32 @@
-import cv2
+from picamera2 import Picamera2
+from libcamera import controls
 
 
-class CameraCapture:
-    def __init__(self, camera_index=0):
-        self.cap = cv2.VideoCapture(camera_index)
+class Camera:
+    def __init__(self, width=1920, height=1080, autofocus=True):
+        self.width = width
+        self.height = height
+        self.autofocus = autofocus
+        self.cam = None
 
-    def is_opened(self):
-        return self.cap.isOpened()
+    def start(self):
+        self.cam = Picamera2()
+        config = self.cam.create_preview_configuration(
+            main={"size": (self.width, self.height), "format": "RGB888"}
+        )
+        self.cam.configure(config)
+        self.cam.start()
 
-    def read_frame(self):
-        return self.cap.read()
+        if self.autofocus:
+            self.cam.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+
+    def read(self):
+        if self.cam is None:
+            raise RuntimeError("Camera has not been started.")
+        return self.cam.capture_array()
 
     def release(self):
-        self.cap.release()
+        if self.cam is not None:
+            self.cam.stop()
+            self.cam.close()
+            self.cam = None

@@ -1,7 +1,7 @@
 import json
 import cv2
 
-from camera.capture import CameraCapture
+from camera.capture import Camera
 from vision.hand_tracker import HandTracker
 from vision.gesture_classifier import GestureClassifier
 from utils.cooldown import Cooldown
@@ -33,7 +33,7 @@ def execute_action(mapped_action, spotify):
 
 
 def main():
-    camera = CameraCapture()
+    camera = Camera()
     tracker = HandTracker()
     classifier = GestureClassifier()
     cooldown = Cooldown(delay=2.0)
@@ -42,16 +42,18 @@ def main():
 
     gesture_map = load_gesture_map()
 
-    if not camera.is_opened():
-        print("Could not open webcam")
+    try:
+        camera.start()
+    except RuntimeError as e:
+        print(f"Could not open camera: {e}")
         return
 
     current_gesture = "No hand"
     current_action = "Waiting..."
 
     while True:
-        ret, frame = camera.read_frame()
-        if not ret:
+        frame = camera.read()
+        if frame is None:
             print("Could not read frame")
             break
 
