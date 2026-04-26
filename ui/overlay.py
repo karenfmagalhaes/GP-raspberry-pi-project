@@ -1,33 +1,39 @@
+# ui/overlay.py
+# Draws gesture and Spotify action information on top of the camera frame.
+
 import cv2
 
 
 def draw_overlay(frame, gesture_text, action_text):
+    # Gesture text
     cv2.putText(
         frame,
         f"Gesture: {gesture_text}",
-        (30, 50),
+        (20, 40),
         cv2.FONT_HERSHEY_SIMPLEX,
-        1,
+        0.7,
         (0, 255, 0),
         2
     )
 
+    # Spotify action text
     cv2.putText(
         frame,
         f"Action: {action_text}",
-        (30, 100),
+        (20, 80),
         cv2.FONT_HERSHEY_SIMPLEX,
-        1,
+        0.7,
         (255, 255, 0),
         2
     )
 
+    # Quit instruction
     cv2.putText(
         frame,
         "Press Q to quit",
-        (30, 150),
+        (20, 120),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
+        0.6,
         (0, 200, 255),
         2
     )
