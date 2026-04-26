@@ -1,3 +1,6 @@
+# spotify/controller.py
+# Controls Spotify playback using Spotipy.
+
 import spotipy
 from spotify.auth import get_spotify_auth
 
@@ -8,7 +11,9 @@ class SpotifyController:
 
     def get_devices(self):
         try:
-            return self.sp.devices().get("devices", [])
+            devices_response = self.sp.devices()
+            return devices_response.get("devices", [])
+
         except Exception as e:
             print(f"[Spotify] Device error: {e}")
             return []
@@ -16,10 +21,12 @@ class SpotifyController:
     def get_active_device(self):
         devices = self.get_devices()
 
+        # First, try to find the currently active Spotify device.
         for device in devices:
             if device.get("is_active"):
                 return device
 
+        # If there is no active device, use the first available device.
         if devices:
             return devices[0]
 
@@ -27,13 +34,19 @@ class SpotifyController:
 
     def get_active_device_id(self):
         device = self.get_active_device()
-        return device.get("id") if device else None
+
+        if device:
+            return device.get("id")
+
+        return None
 
     def device_block_message(self, device):
         if not device:
-            return "No active device"
+            return "No active Spotify device"
+
         if device.get("is_restricted", False):
             return "This Spotify device is restricted"
+
         return None
 
     def play_pause(self):
@@ -48,9 +61,9 @@ class SpotifyController:
             if playback and playback.get("is_playing"):
                 self.sp.pause_playback(device_id=device["id"])
                 return "Paused"
-            else:
-                self.sp.start_playback(device_id=device["id"])
-                return "Playing"
+
+            self.sp.start_playback(device_id=device["id"])
+            return "Playing"
 
         except Exception as e:
             return f"Spotify error: {e}"
@@ -97,6 +110,7 @@ class SpotifyController:
         except Exception as e:
             if "Restriction violated" in str(e):
                 return "Next not allowed on this device/context"
+
             return f"Spotify error: {e}"
 
     def previous_track(self):
@@ -113,6 +127,7 @@ class SpotifyController:
         except Exception as e:
             if "Restriction violated" in str(e):
                 return "Previous not allowed on this device/context"
+
             return f"Spotify error: {e}"
 
     def volume_up(self, step=10):
@@ -126,7 +141,7 @@ class SpotifyController:
             if not device.get("supports_volume", False):
                 return "This device does not support API volume"
 
-            current_volume = device.get("volume_percent", 0)
+            current_volume = device.get("volume_percent") or 0
             new_volume = min(100, current_volume + step)
 
             self.sp.volume(new_volume, device_id=device["id"])
@@ -135,6 +150,7 @@ class SpotifyController:
         except Exception as e:
             if "Cannot control device volume" in str(e):
                 return "This device does not support API volume"
+
             return f"Spotify error: {e}"
 
     def volume_down(self, step=10):
@@ -148,7 +164,7 @@ class SpotifyController:
             if not device.get("supports_volume", False):
                 return "This device does not support API volume"
 
-            current_volume = device.get("volume_percent", 0)
+            current_volume = device.get("volume_percent") or 0
             new_volume = max(0, current_volume - step)
 
             self.sp.volume(new_volume, device_id=device["id"])
@@ -157,6 +173,7 @@ class SpotifyController:
         except Exception as e:
             if "Cannot control device volume" in str(e):
                 return "This device does not support API volume"
+
             return f"Spotify error: {e}"
 
     def get_current_track(self):
