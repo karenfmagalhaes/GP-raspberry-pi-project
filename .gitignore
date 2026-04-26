@@ -1,20 +1,34 @@
-.venv/
-__pycache__/
-*.pyc
-.env
-
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
 
-# Local project config
-config.json
-spotify_token.json
+# Environment variables and secrets
 .env
+*.env
 
-# VS Code
-.vscode/
+# Spotify tokens/cache
+.spotify_cache
+spotify_token.json
+.cache/
 
-# OS
+# Camera test outputs
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.h264
+*.avi
+
+# OS/editor files
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
