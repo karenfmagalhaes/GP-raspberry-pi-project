@@ -91,32 +91,4 @@ class GestureClassifier:
         ):
             return "three_fingers"
 
-        return None         return "thumbs_down"
-
-        # open palm
-        if total_fingers == 4:
-            return "open_palm"
-
-        # fist
-        if total_fingers == 0 and not thumb_up and not thumb_down:
-            return "fist"
-
-        # peace
-        if (
-            fingers_up[0] == 1 and
-            fingers_up[1] == 1 and
-            fingers_up[2] == 0 and
-            fingers_up[3] == 0
-        ):
-            return "peace"
-
-        # three fingers
-        if (
-            fingers_up[0] == 1 and
-            fingers_up[1] == 1 and
-            fingers_up[2] == 1 and
-            fingers_up[3] == 0
-        ):
-            return "three_fingers"
-
         return None
