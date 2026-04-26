@@ -1,38 +1,74 @@
 # camera/capture.py
-# Handles Raspberry Pi Camera Module capture using Picamera2.
-# This class keeps the same methods used in main.py:
-# is_opened(), read_frame(), and release().
+# Camera capture using rpicam-vid MJPEG stream.
+# This avoids Picamera2 Python binding problems in custom Python/pyenv environments.
 
-from picamera2 import Picamera2
+import os
+import select
+import shutil
+import subprocess
+import time
+
+import cv2
+import numpy as np
 
 
 class CameraCapture:
-    def __init__(self, camera_index=0, width=640, height=480):
-        # camera_index is kept so the rest of the project does not break.
-        # Picamera2 does not use camera_index in the same way as OpenCV webcams.
+    def __init__(self, camera_index=0, width=640, height=480, framerate=15):
         self.camera_index = camera_index
         self.width = width
         self.height = height
-        self.picam2 = None
+        self.framerate = framerate
+
+        self.process = None
+        self.buffer = b""
         self.opened = False
 
-        try:
-            self.picam2 = Picamera2()
+        self.camera_command = self._find_camera_command()
 
-            # BGR888 is important because OpenCV uses BGR format.
-            # MediaPipe will later convert BGR to RGB in hand_tracker.py.
-            config = self.picam2.create_preview_configuration(
-                main={
-                    "format": "BGR888",
-                    "size": (self.width, self.height)
-                }
+        if not self.camera_command:
+            print("Camera command not found. Install/use rpicam-apps.")
+            return
+
+        self._start_camera_stream()
+
+    def _find_camera_command(self):
+        if shutil.which("rpicam-vid"):
+            return "rpicam-vid"
+
+        if shutil.which("libcamera-vid"):
+            return "libcamera-vid"
+
+        return None
+
+    def _start_camera_stream(self):
+        command = [
+            self.camera_command,
+            "--timeout", "0",
+            "--codec", "mjpeg",
+            "--width", str(self.width),
+            "--height", str(self.height),
+            "--framerate", str(self.framerate),
+            "--nopreview",
+            "--output", "-"
+        ]
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0
             )
 
-            self.picam2.configure(config)
-            self.picam2.start()
+            time.sleep(2)
+
+            if self.process.poll() is not None:
+                print("Camera stream failed to start.")
+                self.opened = False
+                return
 
             self.opened = True
-            print("Camera started successfully")
+            print("Camera stream started successfully")
 
         except Exception as e:
             print(f"Camera failed to start: {e}")
@@ -42,23 +78,55 @@ class CameraCapture:
         return self.opened
 
     def read_frame(self):
-        if not self.opened or self.picam2 is None:
+        if not self.opened or self.process is None or self.process.stdout is None:
             return False, None
 
-        try:
-            frame = self.picam2.capture_array()
-            return True, frame
+        start_time = time.time()
 
-        except Exception as e:
-            print(f"Failed to read frame: {e}")
-            return False, None
+        while time.time() - start_time < 3:
+            try:
+                ready, _, _ = select.select([self.process.stdout], [], [], 0.5)
+
+                if not ready:
+                    continue
+
+                chunk = os.read(self.process.stdout.fileno(), 4096)
+
+                if not chunk:
+                    return False, None
+
+                self.buffer += chunk
+
+                jpg_start = self.buffer.find(b"\xff\xd8")
+                jpg_end = self.buffer.find(b"\xff\xd9")
+
+                if jpg_start != -1 and jpg_end != -1 and jpg_end > jpg_start:
+                    jpg_data = self.buffer[jpg_start:jpg_end + 2]
+                    self.buffer = self.buffer[jpg_end + 2:]
+
+                    image_array = np.frombuffer(jpg_data, dtype=np.uint8)
+                    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+                    if frame is not None:
+                        return True, frame
+
+            except Exception as e:
+                print(f"Failed to read frame: {e}")
+                return False, None
+
+        return False, None
 
     def release(self):
-        if self.opened and self.picam2 is not None:
-            try:
-                self.picam2.stop()
-                print("Camera stopped")
-            except Exception as e:
-                print(f"Error stopping camera: {e}")
-
         self.opened = False
+
+        if self.process is not None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=2)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+
+        print("Camera stream stopped")
