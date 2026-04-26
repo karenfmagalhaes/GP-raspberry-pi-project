@@ -1,6 +1,7 @@
 # main.py
-# Main program for the Raspberry Pi Spotify gesture controller.
-# It uses the camera, hand gesture detection, body glow visualizer, and Spotify controls.
+# Raspberry Pi Spotify gesture controller.
+# Includes camera, hand gesture recognition, Spotify controls,
+# and optional hologram/body visualizer mode.
 
 import json
 from pathlib import Path
@@ -18,7 +19,6 @@ from ui.overlay import draw_overlay
 
 
 def load_gesture_map():
-    # Finds config/gestures.json safely, even if the program is run from another folder.
     base_dir = Path(__file__).resolve().parent
     gestures_file = base_dir / "config" / "gestures.json"
 
@@ -48,15 +48,45 @@ def execute_action(mapped_action, spotify):
     return "No action mapped"
 
 
+def draw_hologram_status(frame, hologram_enabled):
+    status = "Hologram: ON" if hologram_enabled else "Hologram: OFF"
+
+    cv2.putText(
+        frame,
+        status,
+        (20, 160),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 0, 255),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        "Press H to toggle hologram",
+        (20, 195),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 0, 255),
+        2
+    )
+
+    return frame
+
+
 def main():
-    camera = CameraCapture()
+    # Lower framerate helps reduce delay on Raspberry Pi.
+    camera = CameraCapture(width=640, height=480, framerate=12)
+
     tracker = HandTracker()
     classifier = GestureClassifier()
     pose_visualizer = PoseVisualizer()
-    cooldown = Cooldown(delay=2.0)
-    stability = GestureStability(required_frames=6)
-    spotify = SpotifyController()
 
+    # Faster gesture reaction.
+    cooldown = Cooldown(delay=1.0)
+    stability = GestureStability(required_frames=3)
+
+    spotify = SpotifyController()
     gesture_map = load_gesture_map()
 
     if not camera.is_opened():
@@ -66,7 +96,17 @@ def main():
     current_gesture = "No hand"
     current_action = "Waiting..."
 
-    print("Project started. Press Q to quit.")
+    # Hologram starts ON because it is part of your project idea.
+    hologram_enabled = True
+
+    # Process pose every few frames only to reduce delay.
+    pose_every_n_frames = 3
+    frame_count = 0
+    last_pose_results = None
+
+    print("Project started.")
+    print("Press Q to quit.")
+    print("Press H to turn hologram on/off.")
 
     try:
         while True:
@@ -76,15 +116,21 @@ def main():
                 print("Could not read frame")
                 break
 
+            frame_count += 1
+
             # Mirror image, easier for gesture control.
             frame = cv2.flip(frame, 1)
 
-            # Process pose and hand detection on the clean frame first.
-            pose_results = pose_visualizer.process(frame)
+            # Hand tracking runs every frame because gestures need fast response.
             hand_results = tracker.process(frame)
 
-            # Draw body glow effect.
-            frame = pose_visualizer.draw_glow_pose(frame, pose_results)
+            # Hologram/body pose runs only every 3 frames to reduce delay.
+            if hologram_enabled:
+                if frame_count % pose_every_n_frames == 0:
+                    last_pose_results = pose_visualizer.process(frame)
+
+                if last_pose_results:
+                    frame = pose_visualizer.draw_glow_pose(frame, last_pose_results)
 
             detected_gesture = None
 
@@ -109,11 +155,18 @@ def main():
                 stability.reset()
 
             frame = draw_overlay(frame, current_gesture, current_action)
+            frame = draw_hologram_status(frame, hologram_enabled)
 
             cv2.imshow("Gesture Spotify Player", frame)
 
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord("q"):
                 break
+
+            if key == ord("h"):
+                hologram_enabled = not hologram_enabled
+                print(f"Hologram mode: {'ON' if hologram_enabled else 'OFF'}")
 
     finally:
         camera.release()
