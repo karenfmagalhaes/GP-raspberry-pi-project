@@ -14,7 +14,7 @@ class PoseVisualizer:
         self.pose = self.mp_pose.Pose(
             static_image_mode=False,
             model_complexity=0,
-            smooth_landmarks=True,
+            smooth_landmarks=False,
             min_detection_confidence=0.6,
             min_tracking_confidence=0.6
         )

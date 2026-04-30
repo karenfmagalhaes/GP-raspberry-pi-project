@@ -99,47 +99,52 @@ class CameraCapture:
                 return False, None
 
             try:
-                ready, _, _ = select.select([self.process.stdout], [], [], 0.5)
+                ready, _, _ = select.select([self.process.stdout], [], [], 0.05)
 
                 if not ready:
                     continue
 
-                chunk = os.read(self.process.stdout.fileno(), 4096)
+                chunk = os.read(self.process.stdout.fileno(), 65536)
 
                 if not chunk:
                     return False, None
 
                 self.buffer += chunk
 
+                if len(self.buffer) > self._max_buffer:
+                    self.buffer.clear()
+                    continue
+
                 # Drop any bytes that arrived before the first JPEG SOI marker.
                 jpg_start = self.buffer.find(b"\xff\xd8")
                 if jpg_start == -1:
-                    # No start marker anywhere — discard everything if the buffer
-                    # is large enough to be considered corrupt data.
-                    if len(self.buffer) > self._max_buffer:
-                        self.buffer.clear()
                     continue
                 if jpg_start > 0:
                     del self.buffer[:jpg_start]
 
-                # Search for the JPEG EOI marker after the start.
-                jpg_end = self.buffer.find(b"\xff\xd9", 2)
-                if jpg_end == -1:
-                    # Incomplete frame — safe to keep buffering, but flush if the
-                    # buffer has grown past the cap (corrupt/stalled stream).
-                    if len(self.buffer) > self._max_buffer:
-                        self.buffer.clear()
-                    continue
+                # Drain ALL complete JPEG frames from the buffer and keep only
+                # the newest one. This discards frames that piled up while the
+                # main loop was busy processing the previous frame, which is the
+                # primary cause of visible lag.
+                latest_frame = None
+                while True:
+                    s = self.buffer.find(b"\xff\xd8")
+                    if s == -1:
+                        break
+                    if s > 0:
+                        del self.buffer[:s]
+                    e = self.buffer.find(b"\xff\xd9", 2)
+                    if e == -1:
+                        break
+                    jpg_data = bytes(self.buffer[:e + 2])
+                    del self.buffer[:e + 2]
+                    arr = np.frombuffer(jpg_data, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        latest_frame = frame
 
-                # Extract the complete JPEG and advance the buffer.
-                jpg_data = bytes(self.buffer[:jpg_end + 2])
-                del self.buffer[:jpg_end + 2]
-
-                image_array = np.frombuffer(jpg_data, dtype=np.uint8)
-                frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-
-                if frame is not None:
-                    return True, frame
+                if latest_frame is not None:
+                    return True, latest_frame
 
             except Exception as e:
                 print(f"Failed to read frame: {e}")

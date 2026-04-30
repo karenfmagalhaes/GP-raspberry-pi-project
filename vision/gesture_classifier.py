@@ -1,6 +1,6 @@
 # vision/gesture_classifier.py
 # Classifies hand gestures from MediaPipe hand landmarks.
-# This version makes fist detection easier and more stable.
+# Includes Spotify control gestures and a wake gesture to activate controls.
 
 class GestureClassifier:
     def __init__(self):
@@ -76,9 +76,14 @@ class GestureClassifier:
         if total_up == 4:
             return "open_palm"
 
+        # Wake gesture: only index finger pointing up, all others down.
+        # This activates Spotify controls in main.py.
+        # It must be checked before fist.
+        if index_up and middle_down and ring_down and pinky_down:
+            return "wake"
+
         # Fist:
-        # More flexible than before.
-        # It accepts fist if at least 3 fingers are clearly down.
+        # Flexible detection. Accepts fist if at least 3 fingers are clearly down.
         if total_down >= 3 and total_up <= 1:
             return "fist"
 
