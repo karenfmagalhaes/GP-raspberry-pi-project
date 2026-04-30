@@ -5,7 +5,7 @@ import time
 
 
 class Cooldown:
-    def __init__(self, delay=2.0):
+    def __init__(self, delay=1.0):
         # delay = number of seconds to wait before allowing another action
         self.delay = delay
         self.last_trigger_time = 0

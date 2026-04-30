@@ -20,7 +20,7 @@ class PoseVisualizer:
         )
 
     def process(self, frame):
-        # Frame is BGR from OpenCV/Picamera2.
+        # Frame is BGR from OpenCV/rpicam-vid.
         # MediaPipe needs RGB.
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 

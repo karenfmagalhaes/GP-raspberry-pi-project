@@ -2,7 +2,7 @@
 # Confirms a gesture only after it appears for several frames in a row.
 
 class GestureStability:
-    def __init__(self, required_frames=5):
+    def __init__(self, required_frames=3):
         # required_frames = how many frames the same gesture must appear
         # before it is accepted as stable.
         self.required_frames = required_frames

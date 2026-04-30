@@ -13,15 +13,20 @@ import numpy as np
 
 
 class CameraCapture:
-    def __init__(self, camera_index=0, width=640, height=480, framerate=15):
+    def __init__(self, camera_index=0, width=640, height=480, framerate=15, autofocus=False):
         self.camera_index = camera_index
         self.width = width
         self.height = height
         self.framerate = framerate
 
+        self.autofocus = autofocus
         self.process = None
-        self.buffer = b""
+        self.buffer = bytearray()
         self.opened = False
+
+        # ~1 MB is far larger than any 640x480 MJPEG frame.
+        # If the buffer ever exceeds this, the stream is corrupt.
+        self._max_buffer = 1 * 1024 * 1024
 
         self.camera_command = self._find_camera_command()
 
@@ -51,6 +56,10 @@ class CameraCapture:
             "--nopreview",
             "--output", "-"
         ]
+
+        if self.autofocus:
+            # CM3 continuous autofocus — keeps focus sharp as the hand moves.
+            command += ["--autofocus-mode", "continuous"]
 
         try:
             self.process = subprocess.Popen(
@@ -84,6 +93,11 @@ class CameraCapture:
         start_time = time.time()
 
         while time.time() - start_time < 3:
+            if self.process.poll() is not None:
+                print("Camera process ended unexpectedly.")
+                self.opened = False
+                return False, None
+
             try:
                 ready, _, _ = select.select([self.process.stdout], [], [], 0.5)
 
@@ -97,18 +111,35 @@ class CameraCapture:
 
                 self.buffer += chunk
 
+                # Drop any bytes that arrived before the first JPEG SOI marker.
                 jpg_start = self.buffer.find(b"\xff\xd8")
-                jpg_end = self.buffer.find(b"\xff\xd9")
+                if jpg_start == -1:
+                    # No start marker anywhere — discard everything if the buffer
+                    # is large enough to be considered corrupt data.
+                    if len(self.buffer) > self._max_buffer:
+                        self.buffer.clear()
+                    continue
+                if jpg_start > 0:
+                    del self.buffer[:jpg_start]
 
-                if jpg_start != -1 and jpg_end != -1 and jpg_end > jpg_start:
-                    jpg_data = self.buffer[jpg_start:jpg_end + 2]
-                    self.buffer = self.buffer[jpg_end + 2:]
+                # Search for the JPEG EOI marker after the start.
+                jpg_end = self.buffer.find(b"\xff\xd9", 2)
+                if jpg_end == -1:
+                    # Incomplete frame — safe to keep buffering, but flush if the
+                    # buffer has grown past the cap (corrupt/stalled stream).
+                    if len(self.buffer) > self._max_buffer:
+                        self.buffer.clear()
+                    continue
 
-                    image_array = np.frombuffer(jpg_data, dtype=np.uint8)
-                    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                # Extract the complete JPEG and advance the buffer.
+                jpg_data = bytes(self.buffer[:jpg_end + 2])
+                del self.buffer[:jpg_end + 2]
 
-                    if frame is not None:
-                        return True, frame
+                image_array = np.frombuffer(jpg_data, dtype=np.uint8)
+                frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    return True, frame
 
             except Exception as e:
                 print(f"Failed to read frame: {e}")

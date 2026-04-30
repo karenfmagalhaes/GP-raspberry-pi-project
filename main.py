@@ -4,6 +4,7 @@
 # and optional hologram/body visualizer mode.
 
 import json
+import time
 from pathlib import Path
 
 import cv2
@@ -15,7 +16,7 @@ from vision.pose_visualizer import PoseVisualizer
 from utils.cooldown import Cooldown
 from spotify.controller import SpotifyController
 from utils.gesture_stability import GestureStability
-from ui.overlay import draw_overlay
+from ui.overlay import draw_overlay, draw_hologram_status
 
 
 def load_gesture_map():
@@ -48,35 +49,10 @@ def execute_action(mapped_action, spotify):
     return "No action mapped"
 
 
-def draw_hologram_status(frame, hologram_enabled):
-    status = "Hologram: ON" if hologram_enabled else "Hologram: OFF"
-
-    cv2.putText(
-        frame,
-        status,
-        (20, 160),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 0, 255),
-        2
-    )
-
-    cv2.putText(
-        frame,
-        "Press H to toggle hologram",
-        (20, 195),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 0, 255),
-        2
-    )
-
-    return frame
-
 
 def main():
     # Lower framerate helps reduce delay on Raspberry Pi.
-    camera = CameraCapture(width=640, height=480, framerate=12)
+    camera = CameraCapture(width=640, height=480, framerate=12, autofocus=True)
 
     tracker = HandTracker()
     classifier = GestureClassifier()
@@ -95,6 +71,11 @@ def main():
 
     current_gesture = "No hand"
     current_action = "Waiting..."
+    current_track = ""
+
+    # Refresh "now playing" every 5 seconds; set to 0 to force an immediate first fetch.
+    last_track_time = 0.0
+    track_refresh_interval = 5.0
 
     # Hologram starts ON because it is part of your project idea.
     hologram_enabled = True
@@ -149,12 +130,22 @@ def main():
                     mapped_action = gesture_map.get(stable_gesture, "no_action")
                     current_action = execute_action(mapped_action, spotify)
                     print(f"Gesture: {stable_gesture} -> Action: {current_action}")
+                    stability.reset()
+                    # Force track refresh after actions that change the song.
+                    if mapped_action in ("next_track", "previous_track", "play"):
+                        last_track_time = 0.0
 
             else:
                 current_gesture = "No hand"
                 stability.reset()
 
-            frame = draw_overlay(frame, current_gesture, current_action)
+            # Refresh the now-playing track on a timer.
+            now = time.time()
+            if now - last_track_time >= track_refresh_interval:
+                current_track = spotify.get_current_track()
+                last_track_time = now
+
+            frame = draw_overlay(frame, current_gesture, current_action, current_track)
             frame = draw_hologram_status(frame, hologram_enabled)
 
             cv2.imshow("Gesture Spotify Player", frame)
