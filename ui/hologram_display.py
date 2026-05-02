@@ -21,6 +21,16 @@ class HologramDisplay:
     W = 640
     H = 420
 
+    _GESTURE_LABELS = {
+        "open_palm":     "OPEN PALM",
+        "fist":          "FIST",
+        "three_fingers": "3 FINGERS",
+        "peace":         "PEACE",
+        "thumbs_up":     "THUMBS UP",
+        "thumbs_down":   "THUMBS DN",
+        "wake":          "WAKE",
+    }
+
     def __init__(self, fps=12, show_camera=True):
         pygame.init()
 
@@ -40,6 +50,10 @@ class HologramDisplay:
         self.font_small = pygame.font.SysFont("arial", 14, bold=True)
         self.font_tiny = pygame.font.SysFont("arial", 11)
 
+        self._camera_overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        self._camera_overlay.fill((0, 8, 12, 120))
+        self._panel_surfaces = {}
+
     # ------------------------------------------------------------------
     # Public API used by main.py
     # ------------------------------------------------------------------
@@ -51,7 +65,7 @@ class HologramDisplay:
         message,
         gesture="",
         track="",
-        body_on=False,
+        camera_on=False,
         wake_progress=0.0,
     ):
         if state == "executing":
@@ -65,7 +79,7 @@ class HologramDisplay:
             message=message,
             gesture=gesture,
             track=track,
-            camera_on=body_on,
+            camera_on=camera_on,
             wake_progress=wake_progress,
         )
 
@@ -124,7 +138,7 @@ class HologramDisplay:
         self.screen.fill((0, 0, 0))
 
         if self.show_camera and frame_bgr is not None:
-            self.draw_camera_background(frame_bgr, camera_on)
+            self.draw_camera_background(frame_bgr)
 
         self.draw_grid()
         self.draw_hologram_frame()
@@ -152,7 +166,7 @@ class HologramDisplay:
     # Background
     # ------------------------------------------------------------------
 
-    def draw_camera_background(self, frame_bgr, camera_on):
+    def draw_camera_background(self, frame_bgr):
         frame_bgr = cv2.resize(frame_bgr, (self.W, self.H))
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
@@ -162,12 +176,9 @@ class HologramDisplay:
             "RGB",
         )
 
-        surface.set_alpha(58 if camera_on else 38)
+        surface.set_alpha(58)
         self.screen.blit(surface, (0, 0))
-
-        dark = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-        dark.fill((0, 8, 12, 120))
-        self.screen.blit(dark, (0, 0))
+        self.screen.blit(self._camera_overlay, (0, 0))
 
     def draw_grid(self):
         grid_color = (0, 60, 72)
@@ -383,12 +394,13 @@ class HologramDisplay:
         label = self.font_tiny.render("SYSTEM STATUS", True, (180, 120, 255))
         self.screen.blit(label, (x + 10, y + 7))
 
-        if state == "error":
-            status_text = "ERROR"
-            color = (255, 90, 90)
-        else:
-            status_text = "ONLINE"
-            color = (80, 255, 140)
+        state_labels = {
+            "standby":   ("STANDBY", (0, 200, 255)),
+            "ready":     ("ACTIVE",  (80, 255, 140)),
+            "executing": ("PLAYING", (255, 80, 230)),
+            "error":     ("ERROR",   (255, 90, 90)),
+        }
+        status_text, color = state_labels.get(state, ("STANDBY", (0, 200, 255)))
 
         status = self.font_small.render(status_text, True, color)
         self.screen.blit(status, (x + 10, y + 23))
@@ -404,14 +416,14 @@ class HologramDisplay:
         self.draw_panel_box(x, y, w, h)
 
         if gesture and gesture != "No hand":
-            gesture_text = gesture.upper()
+            gesture_text = self._GESTURE_LABELS.get(gesture, gesture.upper()[:12])
         else:
             gesture_text = "WAITING"
 
         label = self.font_tiny.render("GESTURE", True, (80, 255, 140))
         self.screen.blit(label, (x + 10, y + 7))
 
-        text = self.font_small.render(gesture_text[:12], True, (80, 255, 140))
+        text = self.font_small.render(gesture_text, True, (80, 255, 140))
         self.screen.blit(text, (x + 10, y + 23))
 
         camera_text = "CAMERA: ON" if camera_on else "CAMERA: OFF"
@@ -464,9 +476,12 @@ class HologramDisplay:
             )
 
     def draw_panel_box(self, x, y, w, h):
-        panel = pygame.Surface((w, h), pygame.SRCALPHA)
-        panel.fill((0, 0, 0, 175))
-        self.screen.blit(panel, (x, y))
+        key = (w, h)
+        if key not in self._panel_surfaces:
+            s = pygame.Surface((w, h), pygame.SRCALPHA)
+            s.fill((0, 0, 0, 175))
+            self._panel_surfaces[key] = s
+        self.screen.blit(self._panel_surfaces[key], (x, y))
 
         pygame.draw.rect(self.screen, (255, 60, 220), (x, y, w, h), 1)
         pygame.draw.rect(
@@ -482,13 +497,10 @@ class HologramDisplay:
 
     def get_state_color(self, state):
         colors = {
-            "standby": (0, 210, 255),
-            "ready": (80, 255, 120),
+            "standby":   (0, 210, 255),
+            "ready":     (80, 255, 120),
             "executing": (255, 80, 230),
-            "error": (255, 80, 80),
-            "waiting": (0, 210, 255),
-            "listening": (80, 255, 120),
-            "acting": (255, 80, 230),
+            "error":     (255, 80, 80),
         }
 
         return colors.get(state, colors["standby"])

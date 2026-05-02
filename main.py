@@ -253,7 +253,7 @@ def main():
                 message,
                 gesture=current_gesture,
                 track=current_track,
-                body_on=display.show_camera,
+                camera_on=display.show_camera,
                 wake_progress=wake_progress,
             )
 
