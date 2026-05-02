@@ -218,15 +218,15 @@ class HologramDisplay:
         length = 44
 
         corners = [
-            ((margin, margin), (1, 1), cyan),
-            ((self.W - margin, margin), (-1, 1), cyan),
-            ((margin, self.H - margin), (1, -1), cyan),
-            ((self.W - margin, self.H - margin), (-1, -1), magenta),
+            ((margin, margin), (1, 1), magenta),                  # top-left pink
+            ((self.W - margin, margin), (-1, 1), cyan),           # top-right blue
+            ((margin, self.H - margin), (1, -1), cyan),           # bottom-left blue
+            ((self.W - margin, self.H - margin), (-1, -1), magenta),  # bottom-right pink
         ]
 
-        for (x, y), (dx, dy), color in corners:
-            pygame.draw.line(self.screen, color, (x, y), (x + length * dx, y), 2)
-            pygame.draw.line(self.screen, color, (x, y), (x, y + length * dy), 2)
+        for (x, y), (dx, dy), colour in corners:
+            pygame.draw.line(self.screen, colour, (x, y), (x + length * dx, y), 2)
+            pygame.draw.line(self.screen, colour, (x, y), (x, y + length * dy), 2)
 
     # ------------------------------------------------------------------
     # Hologram centre
@@ -529,7 +529,7 @@ class HologramDisplay:
         self.screen.blit(title, title_rect)
 
         lines = [
-            ("ACTIVATE", "Hold one finger up"),
+            ("ACTIVATE", "One finger up, palm/back ok"),
             ("OPEN PALM", "Play"),
             ("FIST", "Pause"),
             ("THREE FINGERS", "Next track"),
@@ -553,7 +553,7 @@ class HologramDisplay:
             self.screen.blit(action_surface, (x + 190, row_y))
 
         tips = [
-            "Palm facing camera",
+            "Palm facing camera works best",
             "Hand fully visible",
             "Stay around 50-60 cm away",
             "Hold gesture still for 1 second",
