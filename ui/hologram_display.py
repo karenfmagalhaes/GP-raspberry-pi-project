@@ -47,6 +47,7 @@ class HologramDisplay:
         self.action_duration = 1.5
 
         self.show_help = False
+        self.guide_until = 0.0
 
         self.font_big = pygame.font.SysFont("arial", 64, bold=True)
         self.font_medium = pygame.font.SysFont("arial", 26, bold=True)
@@ -135,6 +136,8 @@ class HologramDisplay:
             "peace": "previous",
             "thumbs_up": "volume_up",
             "thumbs_down": "volume_down",
+            "shaka": "guide",
+            "rock": "view",
         }
 
         action = gesture_to_action.get(gesture, "idle")
@@ -177,7 +180,7 @@ class HologramDisplay:
         self.draw_gesture_panel(gesture, view_on)
         self.draw_shortcuts()
 
-        if self.show_help:
+        if self.show_help or time.time() < self.guide_until:
             self.draw_help_menu()
 
         pygame.display.flip()
@@ -297,6 +300,8 @@ class HologramDisplay:
             "volume_up": "VOL+",
             "volume_down": "VOL-",
             "error": "ERROR",
+            "guide": "GUIDE",
+            "view": "VIEW",
             "idle": "♪",
         }
 
@@ -529,7 +534,7 @@ class HologramDisplay:
         self.screen.blit(title, title_rect)
 
         lines = [
-            ("ACTIVATE", "One finger up, palm/back ok"),
+            ("ACTIVATE", "Hold one finger 1.5 sec"),
             ("OPEN PALM", "Play"),
             ("FIST", "Pause"),
             ("THREE FINGERS", "Next track"),
@@ -554,9 +559,9 @@ class HologramDisplay:
 
         tips = [
             "Palm facing camera works best",
-            "Hand fully visible",
-            "Stay around 50-60 cm away",
-            "Hold gesture still for 1 second",
+            "Hand fully visible, 50-60 cm away",
+            "Detection: 0.3-0.5 sec",
+            "Hold gesture about 1 sec, wait 1 sec",
         ]
 
         tip_y = start_y + len(lines) * 21 + 10
