@@ -113,6 +113,7 @@ def main():
     print("HoloBeat — gesture-controlled Spotify hologram interface")
     print("Q = quit")
     print("H = toggle camera background")
+    print("G = gesture guide")
     print("Hold one finger up for 1.5 seconds to activate gesture controls.")
 
     try:

@@ -57,6 +57,11 @@ class HologramDisplay:
         self._camera_overlay.fill((0, 8, 12, 120))
         self._panel_surfaces = {}
 
+        self._help_overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        self._help_overlay.fill((0, 0, 0, 210))
+        self._help_panel = pygame.Surface((self.W - 140, self.H - 58), pygame.SRCALPHA)
+        self._help_panel.fill((2, 8, 14, 235))
+
     # ------------------------------------------------------------------
     # Public API used by main.py
     # ------------------------------------------------------------------
@@ -437,7 +442,7 @@ class HologramDisplay:
         text = self.font_small.render(gesture_text, True, (80, 255, 140))
         self.screen.blit(text, (x + 10, y + 23))
 
-        camera_text = "CAMERA: ON" if camera_on else "CAMERA: OFF"
+        camera_text = "VIEW: ON" if camera_on else "VIEW: OFF"
         camera_surface = self.font_tiny.render(camera_text, True, (0, 220, 255))
         self.screen.blit(camera_surface, (x + 10, y + 39))
 
@@ -514,18 +519,14 @@ class HologramDisplay:
         self.screen.blit(surface, (18, 18))
 
     def draw_help_menu(self):
-        overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 210))
-        self.screen.blit(overlay, (0, 0))
+        self.screen.blit(self._help_overlay, (0, 0))
 
         x = 70
         y = 38
         w = self.W - 140
         h = self.H - 58
 
-        panel = pygame.Surface((w, h), pygame.SRCALPHA)
-        panel.fill((2, 8, 14, 235))
-        self.screen.blit(panel, (x, y))
+        self.screen.blit(self._help_panel, (x, y))
 
         pygame.draw.rect(self.screen, (0, 220, 255), (x, y, w, h), 2)
         pygame.draw.rect(
@@ -544,15 +545,15 @@ class HologramDisplay:
         self.screen.blit(title, title_rect)
 
         lines = [
-            ("ACTIVATE", "Hold one finger up"),
-            ("OPEN PALM", "Play"),
-            ("FIST", "Pause"),
-            ("PEACE SIGN", "Next track"),
-            ("THREE FINGERS", "Previous track"),
-            ("THUMB UP", "Volume up"),
-            ("THUMB DOWN", "Volume down"),
-            ("CAMERA ON", "Gestures work"),
-            ("CAMERA OFF", "Gestures disabled"),
+            ("ACTIVATE",      "Hold one finger up"),
+            ("OPEN PALM",     "Play"),
+            ("FIST",          "Pause"),
+            ("THREE FINGERS", "Next track"),
+            ("PEACE SIGN",    "Previous track"),
+            ("THUMB UP",      "Volume up"),
+            ("THUMB DOWN",    "Volume down"),
+            ("H: VIEW ON",    "Camera background visible"),
+            ("H: VIEW OFF",   "Background hidden, gestures active"),
         ]
 
         start_y = y + 60
