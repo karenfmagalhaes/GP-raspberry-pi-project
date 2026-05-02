@@ -1,13 +1,13 @@
 """
 ui/hologram_display.py
-HoloBeat hologram-style display.
+Clean hologram-style display for HoloBeat.
 
-This version creates a cleaner hologram interface:
-- dark futuristic background
-- rotating music particles
-- glowing central action symbol
-- camera/hologram body can appear faintly in the background
-- gesture/action/track info stays visible
+Adjusted for Raspberry Pi screen:
+- shorter window height so bottom panels fit
+- central hologram moved up slightly
+- bottom panels moved up
+- smaller title and text
+- animated music wave included
 """
 
 import math
@@ -19,7 +19,7 @@ import pygame
 
 class HologramDisplay:
     W = 640
-    H = 480
+    H = 420
 
     def __init__(self, fps=12, show_camera=True):
         pygame.init()
@@ -35,10 +35,10 @@ class HologramDisplay:
         self.action_start_time = time.time()
         self.action_duration = 1.5
 
-        self.font_big = pygame.font.SysFont("arial", 92, bold=True)
-        self.font_medium = pygame.font.SysFont("arial", 34, bold=True)
-        self.font_small = pygame.font.SysFont("arial", 18, bold=True)
-        self.font_tiny = pygame.font.SysFont("arial", 14)
+        self.font_big = pygame.font.SysFont("arial", 64, bold=True)
+        self.font_medium = pygame.font.SysFont("arial", 26, bold=True)
+        self.font_small = pygame.font.SysFont("arial", 14, bold=True)
+        self.font_tiny = pygame.font.SysFont("arial", 11)
 
     # ------------------------------------------------------------------
     # Public API used by main.py
@@ -65,7 +65,7 @@ class HologramDisplay:
             message=message,
             gesture=gesture,
             track=track,
-            body_on=body_on,
+            camera_on=body_on,
             wake_progress=wake_progress,
         )
 
@@ -118,13 +118,13 @@ class HologramDisplay:
         message="",
         gesture="",
         track="",
-        body_on=False,
+        camera_on=False,
         wake_progress=0.0,
     ):
         self.screen.fill((0, 0, 0))
 
         if self.show_camera and frame_bgr is not None:
-            self.draw_camera_background(frame_bgr, body_on)
+            self.draw_camera_background(frame_bgr, camera_on)
 
         self.draw_grid()
         self.draw_hologram_frame()
@@ -138,7 +138,9 @@ class HologramDisplay:
             self.draw_action()
 
         self.draw_top_title(state)
-        self.draw_status(message, gesture, body_on)
+        self.draw_center_status(message)
+        self.draw_system_status_panel(state)
+        self.draw_gesture_panel(gesture, camera_on)
 
         if track:
             self.draw_track(track)
@@ -150,7 +152,7 @@ class HologramDisplay:
     # Background
     # ------------------------------------------------------------------
 
-    def draw_camera_background(self, frame_bgr, body_on):
+    def draw_camera_background(self, frame_bgr, camera_on):
         frame_bgr = cv2.resize(frame_bgr, (self.W, self.H))
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
@@ -160,12 +162,15 @@ class HologramDisplay:
             "RGB",
         )
 
-        # Body hologram mode should be more visible.
-        surface.set_alpha(95 if body_on else 38)
+        surface.set_alpha(58 if camera_on else 38)
         self.screen.blit(surface, (0, 0))
 
+        dark = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        dark.fill((0, 8, 12, 120))
+        self.screen.blit(dark, (0, 0))
+
     def draw_grid(self):
-        grid_color = (0, 55, 65)
+        grid_color = (0, 60, 72)
 
         for x in range(0, self.W, 40):
             pygame.draw.line(self.screen, grid_color, (x, 0), (x, self.H), 1)
@@ -174,32 +179,22 @@ class HologramDisplay:
             pygame.draw.line(self.screen, grid_color, (0, y), (self.W, y), 1)
 
     def draw_hologram_frame(self):
-        color = (0, 160, 180)
-        margin = 14
-        length = 52
+        color = (0, 210, 255)
+        magenta = (255, 60, 220)
+
+        margin = 12
+        length = 44
 
         corners = [
-            ((margin, margin), (1, 1)),
-            ((self.W - margin, margin), (-1, 1)),
-            ((margin, self.H - margin), (1, -1)),
-            ((self.W - margin, self.H - margin), (-1, -1)),
+            ((margin, margin), (1, 1), color),
+            ((self.W - margin, margin), (-1, 1), color),
+            ((margin, self.H - margin), (1, -1), color),
+            ((self.W - margin, self.H - margin), (-1, -1), magenta),
         ]
 
-        for (x, y), (dx, dy) in corners:
-            pygame.draw.line(
-                self.screen,
-                color,
-                (x, y),
-                (x + length * dx, y),
-                2,
-            )
-            pygame.draw.line(
-                self.screen,
-                color,
-                (x, y),
-                (x, y + length * dy),
-                2,
-            )
+        for (x, y), (dx, dy), c in corners:
+            pygame.draw.line(self.screen, c, (x, y), (x + length * dx, y), 2)
+            pygame.draw.line(self.screen, c, (x, y), (x, y + length * dy), 2)
 
     # ------------------------------------------------------------------
     # Hologram centre
@@ -207,32 +202,63 @@ class HologramDisplay:
 
     def draw_idle_visualizer(self, state, wake_progress):
         center_x = self.W // 2
-        center_y = self.H // 2
+        center_y = 188
         t = time.time()
 
         color = self.get_state_color(state)
 
         # Rotating particles.
-        for i in range(28):
-            angle = t * 1.8 + i * (math.pi * 2 / 28)
-            radius = 118 + math.sin(t * 3 + i) * 18
+        for i in range(24):
+            angle = t * 1.6 + i * (math.pi * 2 / 24)
+            radius = 82 + math.sin(t * 2.8 + i) * 8
 
             x = center_x + math.cos(angle) * radius
             y = center_y + math.sin(angle) * radius
 
-            size = 3 + int(2 * (0.5 + 0.5 * math.sin(t * 4 + i)))
-            pygame.draw.circle(self.screen, color, (int(x), int(y)), size)
+            size = 2 + int(2 * (0.5 + 0.5 * math.sin(t * 3 + i)))
 
-        # Outer rings.
-        pygame.draw.circle(self.screen, self.dim(color, 0.35), (center_x, center_y), 124, 1)
-        pygame.draw.circle(self.screen, color, (center_x, center_y), 92, 2)
-        pygame.draw.circle(self.screen, (230, 255, 255), (center_x, center_y), 56, 1)
+            particle_color = (255, 60, 220) if i % 4 == 0 else color
 
-        # Wake progress arc.
+            pygame.draw.circle(
+                self.screen,
+                particle_color,
+                (int(x), int(y)),
+                size,
+            )
+
+        # Rings.
+        pygame.draw.circle(self.screen, self.dim(color, 0.22), (center_x, center_y), 100, 1)
+        pygame.draw.circle(self.screen, color, (center_x, center_y), 75, 2)
+        pygame.draw.circle(self.screen, (245, 250, 255), (center_x, center_y), 42, 1)
+
+        # Hologram base under orb.
+        base_y = center_y + 88
+
+        for r in [36, 25, 15]:
+            pygame.draw.ellipse(
+                self.screen,
+                self.dim((0, 210, 255), 0.65),
+                (
+                    center_x - r,
+                    base_y - int(r * 0.25),
+                    r * 2,
+                    int(r * 0.5),
+                ),
+                1,
+            )
+
+        pygame.draw.line(
+            self.screen,
+            self.dim((0, 210, 255), 0.55),
+            (center_x, base_y),
+            (center_x, center_y + 48),
+            1,
+        )
+
         if wake_progress > 0:
             self.draw_wake_arc(center_x, center_y, wake_progress, color)
 
-        self.draw_center_text("♪", size="big", color=color)
+        self.draw_center_text("♪", size="big", color=color, y=center_y)
 
     def draw_action(self):
         actions = {
@@ -240,8 +266,8 @@ class HologramDisplay:
             "pause": "PAUSE",
             "next": "NEXT",
             "previous": "PREV",
-            "volume_up": "VOL +",
-            "volume_down": "VOL -",
+            "volume_up": "VOL+",
+            "volume_down": "VOL-",
             "error": "ERROR",
             "idle": "♪",
         }
@@ -249,30 +275,34 @@ class HologramDisplay:
         text = actions.get(self.current_action, "♪")
 
         if self.current_action == "error":
-            color = (255, 70, 70)
+            color = (255, 85, 85)
         elif self.current_action in ("volume_up", "volume_down"):
-            color = (255, 210, 60)
+            color = (255, 210, 80)
         elif self.current_action in ("play", "next", "previous"):
             color = (0, 255, 210)
         elif self.current_action == "pause":
-            color = (210, 90, 255)
+            color = (230, 100, 255)
         else:
             color = (0, 255, 255)
 
         center_x = self.W // 2
-        center_y = self.H // 2
+        center_y = 188
 
-        # Action glow circle.
-        for radius, alpha_color in [
-            (132, self.dim(color, 0.12)),
-            (102, self.dim(color, 0.22)),
-            (72, self.dim(color, 0.45)),
-        ]:
-            pygame.draw.circle(self.screen, alpha_color, (center_x, center_y), radius, 2)
+        for radius, factor in [(100, 0.12), (78, 0.22), (58, 0.45)]:
+            pygame.draw.circle(
+                self.screen,
+                self.dim(color, factor),
+                (center_x, center_y),
+                radius,
+                2,
+            )
 
-        self.draw_center_text(text, size="medium", color=color)
+        self.draw_center_text(text, size="medium", color=color, y=center_y)
 
-    def draw_center_text(self, text, size="big", color=(0, 255, 255)):
+    def draw_center_text(self, text, size="big", color=(0, 255, 255), y=None):
+        if y is None:
+            y = self.H // 2
+
         font = self.font_big if size == "big" else self.font_medium
 
         main_color = (245, 255, 255)
@@ -281,19 +311,18 @@ class HologramDisplay:
         text_surface = font.render(text, True, main_color)
         glow_surface = font.render(text, True, glow_color)
 
-        rect = text_surface.get_rect(center=(self.W // 2, self.H // 2))
+        rect = text_surface.get_rect(center=(self.W // 2, y))
 
-        # Glow effect.
-        for offset in [8, 5, 3]:
+        for offset in [6, 4, 2]:
             glow_rect = glow_surface.get_rect(
-                center=(self.W // 2 + offset, self.H // 2 + offset)
+                center=(self.W // 2 + offset, y + offset)
             )
             self.screen.blit(glow_surface, glow_rect)
 
         self.screen.blit(text_surface, rect)
 
     def draw_wake_arc(self, cx, cy, progress, color):
-        radius = 145
+        radius = 112
         start = -math.pi / 2
         end = start + 2 * math.pi * progress
 
@@ -307,64 +336,145 @@ class HologramDisplay:
             points.append((x, y))
 
         if len(points) > 1:
-            pygame.draw.lines(self.screen, color, False, points, 4)
+            pygame.draw.lines(self.screen, color, False, points, 3)
 
     # ------------------------------------------------------------------
-    # UI text
+    # UI text / panels
     # ------------------------------------------------------------------
 
     def draw_top_title(self, state):
         color = self.get_state_color(state)
 
-        title = self.font_small.render("HOLOBEAT", True, color)
+        title = self.font_medium.render("HOLOBEAT", True, color)
         rect = title.get_rect(center=(self.W // 2, 28))
         self.screen.blit(title, rect)
 
-        pygame.draw.line(
-            self.screen,
-            self.dim(color, 0.5),
-            (self.W // 2 - 80, 44),
-            (self.W // 2 + 80, 44),
-            1,
+        subtitle = self.font_small.render(
+            "HOLOGRAPHIC MUSIC ASSISTANT",
+            True,
+            self.dim(color, 0.9),
         )
+        sub_rect = subtitle.get_rect(center=(self.W // 2, 53))
+        self.screen.blit(subtitle, sub_rect)
 
-    def draw_status(self, message, gesture, body_on):
-        y = self.H - 92
-
-        if gesture and gesture != "No hand":
-            gesture_text = f"Gesture: {gesture}"
-        else:
-            gesture_text = "Gesture: waiting"
-
-        body_text = "Camera background: ON" if body_on else "Camera background: OFF"
-
+    def draw_center_status(self, message):
         msg = message if message else "Waiting for command."
 
-        lines = [
-            gesture_text,
-            body_text,
-            msg,
-        ]
+        # Moved lower, but still above bottom panels.
+        y = 315
 
-        for i, line in enumerate(lines):
-            surface = self.font_tiny.render(line[:70], True, (155, 175, 180))
-            rect = surface.get_rect(center=(self.W // 2, y + i * 18))
-            self.screen.blit(surface, rect)
+        glow = self.font_small.render(msg[:44], True, (255, 60, 220))
+        text = self.font_small.render(msg[:44], True, (0, 220, 255))
+
+        glow_rect = glow.get_rect(center=(self.W // 2 + 1, y + 1))
+        text_rect = text.get_rect(center=(self.W // 2, y))
+
+        self.screen.blit(glow, glow_rect)
+        self.screen.blit(text, text_rect)
+
+    def draw_system_status_panel(self, state):
+        x = 18
+        y = 352
+        w = 150
+        h = 52
+
+        self.draw_panel_box(x, y, w, h)
+
+        label = self.font_tiny.render("SYSTEM STATUS", True, (180, 120, 255))
+        self.screen.blit(label, (x + 10, y + 7))
+
+        if state == "error":
+            status_text = "ERROR"
+            color = (255, 90, 90)
+        else:
+            status_text = "ONLINE"
+            color = (80, 255, 140)
+
+        status = self.font_small.render(status_text, True, color)
+        self.screen.blit(status, (x + 10, y + 23))
+
+        pygame.draw.circle(self.screen, color, (x + w - 22, y + 28), 5)
+
+    def draw_gesture_panel(self, gesture, camera_on):
+        x = self.W - 168
+        y = 352
+        w = 150
+        h = 52
+
+        self.draw_panel_box(x, y, w, h)
+
+        if gesture and gesture != "No hand":
+            gesture_text = gesture.upper()
+        else:
+            gesture_text = "WAITING"
+
+        label = self.font_tiny.render("GESTURE", True, (80, 255, 140))
+        self.screen.blit(label, (x + 10, y + 7))
+
+        text = self.font_small.render(gesture_text[:12], True, (80, 255, 140))
+        self.screen.blit(text, (x + 10, y + 23))
+
+        camera_text = "CAMERA: ON" if camera_on else "CAMERA: OFF"
+        camera_surface = self.font_tiny.render(camera_text, True, (0, 220, 255))
+        self.screen.blit(camera_surface, (x + 10, y + 39))
 
     def draw_track(self, track):
-        strip_h = 30
-        y = self.H - strip_h
+        w = 270
+        h = 52
+        x = (self.W - w) // 2
+        y = 352
 
-        strip = pygame.Surface((self.W, strip_h), pygame.SRCALPHA)
-        strip.fill((0, 0, 0, 185))
-        self.screen.blit(strip, (0, y))
+        self.draw_panel_box(x, y, w, h)
 
-        label = "Now playing: " + track
-        if len(label) > 76:
-            label = label[:74] + ".."
+        label = self.font_tiny.render("NOW PLAYING", True, (255, 80, 220))
+        self.screen.blit(label, (x + 10, y + 6))
 
-        surface = self.font_tiny.render(label, True, (170, 210, 215))
-        self.screen.blit(surface, (14, y + 8))
+        text = track
+
+        if len(text) > 30:
+            text = text[:28] + ".."
+
+        surface = self.font_small.render(text, True, (0, 220, 255))
+        self.screen.blit(surface, (x + 10, y + 21))
+
+        self.draw_music_wave(x + 10, y + 45, w - 20)
+
+    def draw_music_wave(self, x, y, width):
+        t = time.time()
+
+        bars = 36
+        gap = 3
+        bar_width = 2
+
+        total_width = bars * (bar_width + gap)
+        start_x = x + max(0, (width - total_width) // 2)
+
+        for i in range(bars):
+            bx = start_x + i * (bar_width + gap)
+            height = int(3 + abs(math.sin(t * 5 + i * 0.45)) * 10)
+
+            color = (255, 80, 220) if i % 4 == 0 else (0, 220, 255)
+
+            pygame.draw.line(
+                self.screen,
+                color,
+                (bx, y),
+                (bx, y - height),
+                bar_width,
+            )
+
+    def draw_panel_box(self, x, y, w, h):
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 175))
+        self.screen.blit(panel, (x, y))
+
+        pygame.draw.rect(self.screen, (255, 60, 220), (x, y, w, h), 1)
+        pygame.draw.rect(
+            self.screen,
+            (0, 220, 255),
+            (x + 3, y + 3, w - 6, h - 6),
+            1,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -385,5 +495,3 @@ class HologramDisplay:
 
     def dim(self, color, factor):
         return tuple(max(0, min(255, int(c * factor))) for c in color)
-
-
