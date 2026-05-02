@@ -1,90 +1,108 @@
-# vision/gesture_classifier.py
-# Classifies hand gestures from MediaPipe hand landmarks.
-# Includes Spotify control gestures and a wake gesture to activate controls.
+import math
+
 
 class GestureClassifier:
-    def __init__(self):
-        # Small tolerance helps avoid shaky landmark detection.
-        self.tolerance = 0.03
+    """
+    Rule-based hand gesture classifier using MediaPipe hand landmarks.
 
-    def finger_is_up(self, landmarks, tip_index, pip_index):
-        # In image coordinates, smaller y means higher on screen.
-        return landmarks[tip_index].y < landmarks[pip_index].y - self.tolerance
-
-    def finger_is_down(self, landmarks, tip_index, pip_index):
-        return landmarks[tip_index].y > landmarks[pip_index].y + self.tolerance
+    Gestures:
+    - wake = one finger up
+    - open_palm = play
+    - fist = pause
+    - three_fingers = next
+    - peace = previous
+    - thumbs_up / thumbs_down = volume
+    - shaka = open/close guide
+    - rock = camera view on/off
+    """
 
     def classify(self, hand_landmarks):
-        landmarks = hand_landmarks.landmark
+        lm = hand_landmarks.landmark
 
-        # Finger indexes:
-        # Index:  tip 8,  pip 6
-        # Middle: tip 12, pip 10
-        # Ring:   tip 16, pip 14
-        # Pinky:  tip 20, pip 18
+        def dist(a, b):
+            return math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y)
 
-        index_up = self.finger_is_up(landmarks, 8, 6)
-        middle_up = self.finger_is_up(landmarks, 12, 10)
-        ring_up = self.finger_is_up(landmarks, 16, 14)
-        pinky_up = self.finger_is_up(landmarks, 20, 18)
+        # Main finger states.
+        index_up = lm[8].y < lm[6].y
+        middle_up = lm[12].y < lm[10].y
+        ring_up = lm[16].y < lm[14].y
+        pinky_up = lm[20].y < lm[18].y
 
-        index_down = self.finger_is_down(landmarks, 8, 6)
-        middle_down = self.finger_is_down(landmarks, 12, 10)
-        ring_down = self.finger_is_down(landmarks, 16, 14)
-        pinky_down = self.finger_is_down(landmarks, 20, 18)
+        index_down = not index_up
+        middle_down = not middle_up
+        ring_down = not ring_up
+        pinky_down = not pinky_up
 
-        fingers_up = [index_up, middle_up, ring_up, pinky_up]
-        fingers_down = [index_down, middle_down, ring_down, pinky_down]
+        # Thumb landmarks.
+        thumb_tip = lm[4]
+        thumb_ip = lm[3]
+        thumb_mcp = lm[2]
+        wrist = lm[0]
 
-        total_up = sum(fingers_up)
-        total_down = sum(fingers_down)
+        # Thumb extension checks.
+        thumb_sideways = abs(thumb_tip.x - thumb_mcp.x) > 0.055
+        thumb_long = dist(4, 2) > dist(3, 2) * 1.15
+        thumb_extended = thumb_sideways or thumb_long
 
-        thumb_tip = landmarks[4]
-        thumb_ip = landmarks[3]
-        thumb_mcp = landmarks[2]
-        wrist = landmarks[0]
+        # More relaxed pinky extension for shaka/rock.
+        pinky_long = dist(20, 17) > dist(18, 17) * 1.15
+        pinky_extended = pinky_up or pinky_long
 
-        thumb_up = (
-            thumb_tip.y < thumb_ip.y - self.tolerance and
-            thumb_ip.y < thumb_mcp.y - self.tolerance and
-            thumb_tip.y < wrist.y
-        )
+        # ------------------------------------------------------------
+        # Interface gestures first
+        # ------------------------------------------------------------
 
-        thumb_down = (
-            thumb_tip.y > thumb_ip.y + self.tolerance and
-            thumb_ip.y > thumb_mcp.y + self.tolerance and
-            thumb_tip.y > wrist.y
-        )
+        # 🤙 Shaka: thumb + pinky extended, index/middle/ring folded.
+        if thumb_extended and pinky_extended and index_down and middle_down and ring_down:
+            return None  # shaka disabled because it opens guide by accident
 
-        # Thumbs up/down need most other fingers down.
-        # We accept 3 out of 4 fingers down because the camera may miss one finger.
-        if thumb_up and total_down >= 3:
-            return "thumbs_up"
+        # 🤘 Rock: index + pinky extended, middle/ring folded.
+        if index_up and pinky_extended and middle_down and ring_down:
+            return "rock"
 
-        if thumb_down and total_down >= 3:
-            return "thumbs_down"
+        # ------------------------------------------------------------
+        # Spotify gestures
+        # ------------------------------------------------------------
 
-        # Peace: index and middle up, ring and pinky down.
-        if index_up and middle_up and ring_down and pinky_down:
-            return "peace"
+        # Open palm.
+        if index_up and middle_up and ring_up and pinky_up:
+            return "open_palm"
 
-        # Three fingers: index, middle, and ring up, pinky down.
+        # Fist / thumbs.
+        # IMPORTANT:
+        # Pause was getting confused with volume, so thumbs_up/down must be
+        # very clear. Otherwise, a closed hand is treated as fist = pause.
+        if index_down and middle_down and ring_down and pinky_down:
+            clear_thumb_up = (
+                thumb_extended
+                and thumb_tip.y < wrist.y - 0.13
+                and thumb_tip.y < thumb_mcp.y - 0.08
+            )
+
+            clear_thumb_down = (
+                thumb_extended
+                and thumb_tip.y > wrist.y + 0.18
+                and thumb_tip.y > thumb_mcp.y + 0.08
+            )
+
+            if clear_thumb_up:
+                return "thumbs_up"
+
+            if clear_thumb_down:
+                return "thumbs_down"
+
+            return "fist"
+
+        # Three fingers = next.
         if index_up and middle_up and ring_up and pinky_down:
             return "three_fingers"
 
-        # Open palm: all four main fingers up.
-        if total_up == 4:
-            return "open_palm"
+        # Peace = previous.
+        if index_up and middle_up and ring_down and pinky_down:
+            return "peace"
 
-        # Wake gesture: only index finger pointing up, all others down.
-        # This activates Spotify controls in main.py.
-        # It must be checked before fist.
+        # Wake = only index up.
         if index_up and middle_down and ring_down and pinky_down:
             return "wake"
-
-        # Fist:
-        # Flexible detection. Accepts fist if at least 3 fingers are clearly down.
-        if total_down >= 3 and total_up <= 1:
-            return "fist"
 
         return None
