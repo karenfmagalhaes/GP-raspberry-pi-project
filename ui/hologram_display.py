@@ -242,7 +242,6 @@ class HologramDisplay:
             "previous": "PREV",
             "volume_up": "VOL +",
             "volume_down": "VOL -",
-            "like": "LOVE",
             "error": "ERROR",
             "idle": "♪",
         }
@@ -337,7 +336,7 @@ class HologramDisplay:
         else:
             gesture_text = "Gesture: waiting"
 
-        body_text = "Body hologram: ON" if body_on else "Body hologram: OFF"
+        body_text = "Camera background: ON" if body_on else "Camera background: OFF"
 
         msg = message if message else "Waiting for command."
 
