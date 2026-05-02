@@ -53,6 +53,30 @@ def _execute(mapped_action, spotify):
     return "No action mapped"
 
 
+def _execute_ui_gesture(gesture, display):
+    """
+    Interface-only gestures.
+
+    Guide is now keyboard only:
+    G = open/close guide
+
+    Rock gesture still controls camera view:
+    rock = show/hide camera background
+    """
+    if gesture != "rock":
+        return None
+
+    latched = getattr(display, "_ui_gesture_latched", None)
+
+    if latched == gesture:
+        return None
+
+    display._ui_gesture_latched = gesture
+
+    display.show_camera = not display.show_camera
+    return "Camera view ON." if display.show_camera else "Camera view OFF."
+
+
 def _is_error(result):
     result = result.lower()
 
@@ -114,6 +138,8 @@ def main():
     print("Q = quit")
     print("H = toggle camera background")
     print("G = gesture guide")
+    print("🤙 shaka gesture = open/close guide")
+    print("🤘 rock gesture = toggle camera background")
     print("Hold one finger up for 1.5 seconds to activate gesture controls.")
 
     try:
@@ -156,6 +182,10 @@ def main():
             if detected:
                 current_gesture = detected
 
+                # Reset UI gesture latch when the user changes gesture.
+                if detected not in ("shaka", "rock"):
+                    setattr(display, "_ui_gesture_latched", None)
+
                 if not gesture_active:
                     if wake_detector.update(detected):
                         gesture_active = True
@@ -187,30 +217,47 @@ def main():
                         stable = stability.update(detected)
 
                         if stable and cooldown.ready():
-                            mapped_action = gesture_map.get(stable, "no_action")
-                            result = _execute(mapped_action, spotify)
+                            # UI gestures first:
+                            # shaka = guide, rock = camera view
+                            ui_result = _execute_ui_gesture(stable, display)
 
-                            if _is_error(result):
-                                state = "error"
-                                message = result
-                                action_until = now + 4.0
+                            if ui_result:
+                                state = "executing"
+                                message = ui_result
+                                action_until = now + 2.0
+
+                                print(f"[HoloBeat] {stable} -> {ui_result}")
+
+                                last_active_time = now
+                                stability.reset()
+                                cooldown.reset()
 
                             else:
-                                state = "executing"
-                                message = _GESTURE_MESSAGES.get(stable, "Done.")
-                                action_until = now + 3.0
+                                mapped_action = gesture_map.get(stable, "no_action")
+                                result = _execute(mapped_action, spotify)
 
-                            print(f"[HoloBeat] {stable} -> {result}")
+                                if _is_error(result):
+                                    state = "error"
+                                    message = result
+                                    action_until = now + 4.0
 
-                            last_active_time = now
-                            stability.reset()
-                            cooldown.reset()
+                                else:
+                                    state = "executing"
+                                    message = _GESTURE_MESSAGES.get(stable, "Done.")
+                                    action_until = now + 3.0
 
-                            if mapped_action in ("next_track", "previous_track", "play"):
-                                last_track_time = 0.0
+                                print(f"[HoloBeat] {stable} -> {result}")
+
+                                last_active_time = now
+                                stability.reset()
+                                cooldown.reset()
+
+                                if mapped_action in ("next_track", "previous_track", "play"):
+                                    last_track_time = 0.0
 
             else:
                 current_gesture = "No hand"
+                setattr(display, "_ui_gesture_latched", None)
                 stability.reset()
                 wake_detector.reset()
 
