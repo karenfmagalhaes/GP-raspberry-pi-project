@@ -13,13 +13,22 @@ import numpy as np
 
 
 class CameraCapture:
-    def __init__(self, camera_index=0, width=640, height=480, framerate=15, autofocus=False):
+    def __init__(
+        self,
+        camera_index=0,
+        width=640,
+        height=480,
+        framerate=15,
+        rotation=0,
+        autofocus=False
+    ):
         self.camera_index = camera_index
         self.width = width
         self.height = height
         self.framerate = framerate
-
+        self.rotation = rotation
         self.autofocus = autofocus
+
         self.process = None
         self.buffer = bytearray()
         self.opened = False
@@ -83,6 +92,18 @@ class CameraCapture:
             print(f"Camera failed to start: {e}")
             self.opened = False
 
+    def _apply_rotation(self, frame):
+        if self.rotation == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        if self.rotation == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+
+        if self.rotation == 270:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        return frame
+
     def is_opened(self):
         return self.opened
 
@@ -117,33 +138,42 @@ class CameraCapture:
 
                 # Drop any bytes that arrived before the first JPEG SOI marker.
                 jpg_start = self.buffer.find(b"\xff\xd8")
+
                 if jpg_start == -1:
                     continue
+
                 if jpg_start > 0:
                     del self.buffer[:jpg_start]
 
                 # Drain ALL complete JPEG frames from the buffer and keep only
-                # the newest one. This discards frames that piled up while the
-                # main loop was busy processing the previous frame, which is the
-                # primary cause of visible lag.
+                # the newest one. This reduces visible camera lag.
                 latest_frame = None
+
                 while True:
                     s = self.buffer.find(b"\xff\xd8")
+
                     if s == -1:
                         break
+
                     if s > 0:
                         del self.buffer[:s]
+
                     e = self.buffer.find(b"\xff\xd9", 2)
+
                     if e == -1:
                         break
+
                     jpg_data = bytes(self.buffer[:e + 2])
                     del self.buffer[:e + 2]
+
                     arr = np.frombuffer(jpg_data, dtype=np.uint8)
                     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
                     if frame is not None:
                         latest_frame = frame
 
                 if latest_frame is not None:
+                    latest_frame = self._apply_rotation(latest_frame)
                     return True, latest_frame
 
             except Exception as e:

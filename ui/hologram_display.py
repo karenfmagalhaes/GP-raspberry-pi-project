@@ -1,15 +1,13 @@
 """
 ui/hologram_display.py
-Pygame-based hologram display for HoloBeat.
-640 x 480  |  12 FPS  |  minimal elements
+HoloBeat hologram-style display.
 
-Layout
-------
-  top-left   : gesture badge + body indicator (tiny)
-  top-center : HOLOBEAT title
-  center     : animated orb (standby/ready) or sound bars (executing)
-  center-low : state label + message text
-  bottom     : now-playing strip (32 px)
+This version creates a cleaner hologram interface:
+- dark futuristic background
+- rotating music particles
+- glowing central action symbol
+- camera/hologram body can appear faintly in the background
+- gesture/action/track info stays visible
 """
 
 import math
@@ -18,260 +16,375 @@ import time
 import cv2
 import pygame
 
-# ---------------------------------------------------------------------------
-# Color palette  —  RGB (NOT BGR; pygame uses RGB)
-# ---------------------------------------------------------------------------
-_BG = (4, 4, 8)
-
-_COLORS = {
-    "standby":   (70, 100, 130),    # steel-blue
-    "ready":     (80, 190,  70),    # soft green
-    "executing": (155,  55, 175),   # soft purple
-    "error":     (195,  55,  50),   # soft red
-    # backward-compat aliases
-    "waiting":   (70, 100, 130),
-    "watching":  (70, 100, 130),
-    "listening": (80, 190,  70),
-    "acting":    (155,  55, 175),
-    "action":    (155,  55, 175),
-    "sleeping":  (70, 100, 130),
-}
-
-
-def _color(state):
-    return _COLORS.get(state, _COLORS["standby"])
-
-
-def _dim(rgb, f=0.28):
-    return tuple(max(0, int(c * f)) for c in rgb)
-
-
-def _wrap(text, max_chars=48):
-    words = text.split()
-    lines, cur = [], ""
-    for word in words:
-        fits = len(cur) + len(word) + (1 if cur else 0) <= max_chars
-        if fits:
-            cur = (cur + " " + word).strip() if cur else word
-        else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
-    return lines
-
 
 class HologramDisplay:
     W = 640
     H = 480
 
-    # Orb sits slightly above centre so text fits below it.
-    ORB_CX = 320
-    ORB_CY = 210
-
     def __init__(self, fps=12, show_camera=True):
         pygame.init()
-        pygame.display.set_caption("HoloBeat")
+
         self.screen = pygame.display.set_mode((self.W, self.H))
-        self.clock  = pygame.time.Clock()
-        self.fps    = fps
+        pygame.display.set_caption("HoloBeat")
+
+        self.clock = pygame.time.Clock()
+        self.fps = fps
         self.show_camera = show_camera
 
-        # Monospace fonts — sizes kept small for Pi LCD readability.
-        self._f_title = pygame.font.SysFont("monospace", 19, bold=True)
-        self._f_state = pygame.font.SysFont("monospace", 14, bold=True)
-        self._f_msg   = pygame.font.SysFont("monospace", 12)
-        self._f_track = pygame.font.SysFont("monospace", 11)
-        self._f_badge = pygame.font.SysFont("monospace", 10)
+        self.current_action = "idle"
+        self.action_start_time = time.time()
+        self.action_duration = 1.5
 
-        # Pre-rendered static overlays (built once).
-        self._scanlines = self._build_scanlines()
+        self.font_big = pygame.font.SysFont("arial", 92, bold=True)
+        self.font_medium = pygame.font.SysFont("arial", 34, bold=True)
+        self.font_small = pygame.font.SysFont("arial", 18, bold=True)
+        self.font_tiny = pygame.font.SysFont("arial", 14)
 
     # ------------------------------------------------------------------
-    # Public API
+    # Public API used by main.py
     # ------------------------------------------------------------------
 
-    def draw(self, frame_bgr, state, message,
-             gesture="", track="", body_on=False, wake_progress=0.0):
-        t     = time.time()
-        color = _color(state)
-        dim   = _dim(color)
-
-        # 1 · Dark background
-        self.screen.fill(_BG)
-
-        # 2 · Camera layer.
-        #     When body_on=True, frame_bgr is already the hologram-transformed
-        #     image (dark + glowing body), so we raise alpha so it reads through.
-        if self.show_camera and frame_bgr is not None:
-            cam_alpha = 72 if body_on else 32
-            self._blit_camera(frame_bgr, alpha=cam_alpha)
-
-        # 3 · Subtle grid texture
-        self._draw_grid(dim)
-
-        # 4 · Scan lines
-        self.screen.blit(self._scanlines, (0, 0))
-
-        cx, cy = self.ORB_CX, self.ORB_CY
-
-        # 5 · Central graphic  (orb or sound bars)
+    def draw(
+        self,
+        frame_bgr,
+        state,
+        message,
+        gesture="",
+        track="",
+        body_on=False,
+        wake_progress=0.0,
+    ):
         if state == "executing":
-            self._draw_bars(cx, cy, color, dim, t)
-        else:
-            self._draw_orb(cx, cy, color, dim, state, t)
+            self.show_action_from_gesture(gesture)
+        elif state == "error":
+            self.show_action("error")
 
-        # 6 · Wake-hold progress arc (appears around orb while finger is held up)
-        if wake_progress > 0.0:
-            self._draw_wake_arc(cx, cy, wake_progress, color)
-
-        # 7 · Title  ─────────────────────────────────────────────────────
-        self._center_text(self._f_title, "HOLOBEAT", self.W // 2, 28, color)
-        pygame.draw.line(self.screen, dim,
-                         (self.W // 2 - 68, 40), (self.W // 2 + 68, 40), 1)
-
-        # 8 · State + message  ───────────────────────────────────────────
-        self._center_text(self._f_state, state.upper(), self.W // 2, cy + 74, color)
-        for i, line in enumerate(_wrap(message)[:2]):
-            self._center_text(self._f_msg, line, self.W // 2, cy + 96 + i * 17,
-                              (135, 135, 135))
-
-        # 9 · Gesture badge  (top-left, only when a hand is detected)
-        if gesture and gesture != "No hand":
-            self._badge(gesture[:22], 10, 10)
-
-        # 10 · Body indicator  (top-left, below gesture badge)
-        self._badge("body ON" if body_on else "body OFF",
-                    10, 34, bright=body_on)
-
-        # 11 · Now-playing strip  (bottom 32 px)
-        if track:
-            self._draw_track_strip(track, color, dim)
-
-        pygame.display.flip()
-        self.clock.tick(self.fps)
+        self.update(
+            frame_bgr=frame_bgr,
+            state=state,
+            message=message,
+            gesture=gesture,
+            track=track,
+            body_on=body_on,
+            wake_progress=wake_progress,
+        )
 
     def poll(self):
-        """
-        Process pygame events.  Returns one of:
-          'quit'         – user pressed Q or closed the window
-          'toggle_body'  – user pressed H
-          None           – nothing actionable
-        """
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "quit"
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_q:
                     return "quit"
+
                 if event.key == pygame.K_h:
                     return "toggle_body"
+
         return None
 
     def close(self):
         pygame.quit()
 
     # ------------------------------------------------------------------
-    # Drawing helpers
+    # Action state
     # ------------------------------------------------------------------
 
-    def _blit_camera(self, frame_bgr, alpha):
+    def show_action(self, action):
+        self.current_action = action
+        self.action_start_time = time.time()
+
+    def show_action_from_gesture(self, gesture):
+        gesture_to_action = {
+            "open_palm": "play",
+            "fist": "pause",
+            "three_fingers": "next",
+            "peace": "previous",
+            "thumbs_up": "volume_up",
+            "thumbs_down": "volume_down",
+        }
+
+        action = gesture_to_action.get(gesture, "idle")
+        self.show_action(action)
+
+    # ------------------------------------------------------------------
+    # Main update
+    # ------------------------------------------------------------------
+
+    def update(
+        self,
+        frame_bgr=None,
+        state="standby",
+        message="",
+        gesture="",
+        track="",
+        body_on=False,
+        wake_progress=0.0,
+    ):
+        self.screen.fill((0, 0, 0))
+
+        if self.show_camera and frame_bgr is not None:
+            self.draw_camera_background(frame_bgr, body_on)
+
+        self.draw_grid()
+        self.draw_hologram_frame()
+
+        if time.time() - self.action_start_time > self.action_duration:
+            self.current_action = "idle"
+
+        if self.current_action == "idle":
+            self.draw_idle_visualizer(state, wake_progress)
+        else:
+            self.draw_action()
+
+        self.draw_top_title(state)
+        self.draw_status(message, gesture, body_on)
+
+        if track:
+            self.draw_track(track)
+
+        pygame.display.flip()
+        self.clock.tick(self.fps)
+
+    # ------------------------------------------------------------------
+    # Background
+    # ------------------------------------------------------------------
+
+    def draw_camera_background(self, frame_bgr, body_on):
+        frame_bgr = cv2.resize(frame_bgr, (self.W, self.H))
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        # frombuffer is faster than surfarray on Raspberry Pi.
-        surf = pygame.image.frombuffer(frame_rgb.tobytes(), (self.W, self.H), "RGB")
-        surf.set_alpha(alpha)
-        self.screen.blit(surf, (0, 0))
 
-    def _draw_grid(self, color):
-        step = 40
-        for x in range(0, self.W + 1, step):
-            pygame.draw.line(self.screen, color, (x, 0), (x, self.H), 1)
-        for y in range(0, self.H + 1, step):
-            pygame.draw.line(self.screen, color, (0, y), (self.W, y), 1)
+        surface = pygame.image.frombuffer(
+            frame_rgb.tobytes(),
+            (self.W, self.H),
+            "RGB",
+        )
 
-    def _draw_orb(self, cx, cy, color, dim, state, t):
-        speed = 1.8 if state == "ready" else 0.7
+        # Body hologram mode should be more visible.
+        surface.set_alpha(95 if body_on else 38)
+        self.screen.blit(surface, (0, 0))
 
-        # One expanding ghost ring (fades out as it grows).
-        phase   = (t * speed) % 1.0
-        r_ring  = int(44 + phase * 28)
-        a_ring  = int(88 * (1.0 - phase))
-        if a_ring > 0:
-            ring_surf = pygame.Surface((r_ring * 2 + 4, r_ring * 2 + 4), pygame.SRCALPHA)
-            pygame.draw.circle(ring_surf, (*color, a_ring),
-                               (r_ring + 2, r_ring + 2), r_ring, 1)
-            self.screen.blit(ring_surf, (cx - r_ring - 2, cy - r_ring - 2))
+    def draw_grid(self):
+        grid_color = (0, 55, 65)
 
-        # Static outer ring.
-        pygame.draw.circle(self.screen, dim, (cx, cy), 44, 1)
+        for x in range(0, self.W, 40):
+            pygame.draw.line(self.screen, grid_color, (x, 0), (x, self.H), 1)
 
-        # Breathing inner orb — soft glow approximation without SRCALPHA.
-        pulse   = 0.5 + 0.5 * math.sin(t * speed)
-        r_inner = int(16 + pulse * 8)
+        for y in range(0, self.H, 40):
+            pygame.draw.line(self.screen, grid_color, (0, y), (self.W, y), 1)
 
-        for i in range(4):
-            r_g = r_inner + (4 - i) * 5
-            brightness = 0.22 - i * 0.05
-            if brightness <= 0:
-                break
-            c = tuple(int(ch * brightness) for ch in color)
-            pygame.draw.circle(self.screen, c, (cx, cy), r_g)
+    def draw_hologram_frame(self):
+        color = (0, 160, 180)
+        margin = 14
+        length = 52
 
-        # Crisp outline.
-        pygame.draw.circle(self.screen, color, (cx, cy), r_inner, 2)
-
-    def _draw_bars(self, cx, cy, color, dim, t):
-        n = 5
-        bw, gap = 10, 7
-        x0 = cx - (n * (bw + gap) - gap) // 2
-
-        for i in range(n):
-            h_bar = int(10 + abs(math.sin(t * 4.2 + i * 0.95)) * 44)
-            bx    = x0 + i * (bw + gap)
-            by_b  = cy + 30
-            rect  = pygame.Rect(bx, by_b - h_bar, bw, h_bar)
-            pygame.draw.rect(self.screen, dim,   rect)
-            pygame.draw.rect(self.screen, color, rect, 1)
-
-    def _draw_wake_arc(self, cx, cy, progress, color):
-        r     = 56
-        start = -math.pi / 2
-        end   = start + 2 * math.pi * progress
-        steps = max(2, int(72 * progress))
-        pts   = [
-            (int(cx + r * math.cos(start + (end - start) * k / steps)),
-             int(cy + r * math.sin(start + (end - start) * k / steps)))
-            for k in range(steps + 1)
+        corners = [
+            ((margin, margin), (1, 1)),
+            ((self.W - margin, margin), (-1, 1)),
+            ((margin, self.H - margin), (1, -1)),
+            ((self.W - margin, self.H - margin), (-1, -1)),
         ]
-        if len(pts) >= 2:
-            pygame.draw.lines(self.screen, color, False, pts, 2)
 
-    def _draw_track_strip(self, track, color, dim):
-        y0    = self.H - 32
-        strip = pygame.Surface((self.W, 32), pygame.SRCALPHA)
-        strip.fill((5, 5, 10, 210))
-        self.screen.blit(strip, (0, y0))
-        pygame.draw.line(self.screen, dim, (0, y0), (self.W, y0), 1)
-        label = "Now:  " + (track if len(track) <= 64 else track[:62] + "..")
-        self.screen.blit(self._f_track.render(label, True, (125, 125, 125)), (14, y0 + 10))
+        for (x, y), (dx, dy) in corners:
+            pygame.draw.line(
+                self.screen,
+                color,
+                (x, y),
+                (x + length * dx, y),
+                2,
+            )
+            pygame.draw.line(
+                self.screen,
+                color,
+                (x, y),
+                (x, y + length * dy),
+                2,
+            )
 
-    def _badge(self, text, x, y, bright=True):
-        tw, _ = self._f_badge.size(text)
-        bw, bh = tw + 14, 20
-        s = pygame.Surface((bw, bh), pygame.SRCALPHA)
-        s.fill((8, 8, 14, 180))
-        self.screen.blit(s, (x, y))
-        pygame.draw.rect(self.screen, (46, 46, 52), (x, y, bw, bh), 1)
-        col = (148, 148, 148) if bright else (85, 85, 85)
-        self.screen.blit(self._f_badge.render(text, True, col), (x + 7, y + 5))
+    # ------------------------------------------------------------------
+    # Hologram centre
+    # ------------------------------------------------------------------
 
-    def _center_text(self, font, text, x, y, color):
-        surf = font.render(text, True, color)
-        self.screen.blit(surf, surf.get_rect(center=(x, y)))
+    def draw_idle_visualizer(self, state, wake_progress):
+        center_x = self.W // 2
+        center_y = self.H // 2
+        t = time.time()
 
-    def _build_scanlines(self):
-        s = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-        for y in range(0, self.H, 3):
-            pygame.draw.line(s, (0, 0, 0, 26), (0, y), (self.W, y), 1)
-        return s
+        color = self.get_state_color(state)
+
+        # Rotating particles.
+        for i in range(28):
+            angle = t * 1.8 + i * (math.pi * 2 / 28)
+            radius = 118 + math.sin(t * 3 + i) * 18
+
+            x = center_x + math.cos(angle) * radius
+            y = center_y + math.sin(angle) * radius
+
+            size = 3 + int(2 * (0.5 + 0.5 * math.sin(t * 4 + i)))
+            pygame.draw.circle(self.screen, color, (int(x), int(y)), size)
+
+        # Outer rings.
+        pygame.draw.circle(self.screen, self.dim(color, 0.35), (center_x, center_y), 124, 1)
+        pygame.draw.circle(self.screen, color, (center_x, center_y), 92, 2)
+        pygame.draw.circle(self.screen, (230, 255, 255), (center_x, center_y), 56, 1)
+
+        # Wake progress arc.
+        if wake_progress > 0:
+            self.draw_wake_arc(center_x, center_y, wake_progress, color)
+
+        self.draw_center_text("♪", size="big", color=color)
+
+    def draw_action(self):
+        actions = {
+            "play": "PLAY",
+            "pause": "PAUSE",
+            "next": "NEXT",
+            "previous": "PREV",
+            "volume_up": "VOL +",
+            "volume_down": "VOL -",
+            "like": "LOVE",
+            "error": "ERROR",
+            "idle": "♪",
+        }
+
+        text = actions.get(self.current_action, "♪")
+
+        if self.current_action == "error":
+            color = (255, 70, 70)
+        elif self.current_action in ("volume_up", "volume_down"):
+            color = (255, 210, 60)
+        elif self.current_action in ("play", "next", "previous"):
+            color = (0, 255, 210)
+        elif self.current_action == "pause":
+            color = (210, 90, 255)
+        else:
+            color = (0, 255, 255)
+
+        center_x = self.W // 2
+        center_y = self.H // 2
+
+        # Action glow circle.
+        for radius, alpha_color in [
+            (132, self.dim(color, 0.12)),
+            (102, self.dim(color, 0.22)),
+            (72, self.dim(color, 0.45)),
+        ]:
+            pygame.draw.circle(self.screen, alpha_color, (center_x, center_y), radius, 2)
+
+        self.draw_center_text(text, size="medium", color=color)
+
+    def draw_center_text(self, text, size="big", color=(0, 255, 255)):
+        font = self.font_big if size == "big" else self.font_medium
+
+        main_color = (245, 255, 255)
+        glow_color = color
+
+        text_surface = font.render(text, True, main_color)
+        glow_surface = font.render(text, True, glow_color)
+
+        rect = text_surface.get_rect(center=(self.W // 2, self.H // 2))
+
+        # Glow effect.
+        for offset in [8, 5, 3]:
+            glow_rect = glow_surface.get_rect(
+                center=(self.W // 2 + offset, self.H // 2 + offset)
+            )
+            self.screen.blit(glow_surface, glow_rect)
+
+        self.screen.blit(text_surface, rect)
+
+    def draw_wake_arc(self, cx, cy, progress, color):
+        radius = 145
+        start = -math.pi / 2
+        end = start + 2 * math.pi * progress
+
+        steps = max(2, int(100 * progress))
+        points = []
+
+        for i in range(steps + 1):
+            angle = start + (end - start) * i / steps
+            x = int(cx + math.cos(angle) * radius)
+            y = int(cy + math.sin(angle) * radius)
+            points.append((x, y))
+
+        if len(points) > 1:
+            pygame.draw.lines(self.screen, color, False, points, 4)
+
+    # ------------------------------------------------------------------
+    # UI text
+    # ------------------------------------------------------------------
+
+    def draw_top_title(self, state):
+        color = self.get_state_color(state)
+
+        title = self.font_small.render("HOLOBEAT", True, color)
+        rect = title.get_rect(center=(self.W // 2, 28))
+        self.screen.blit(title, rect)
+
+        pygame.draw.line(
+            self.screen,
+            self.dim(color, 0.5),
+            (self.W // 2 - 80, 44),
+            (self.W // 2 + 80, 44),
+            1,
+        )
+
+    def draw_status(self, message, gesture, body_on):
+        y = self.H - 92
+
+        if gesture and gesture != "No hand":
+            gesture_text = f"Gesture: {gesture}"
+        else:
+            gesture_text = "Gesture: waiting"
+
+        body_text = "Body hologram: ON" if body_on else "Body hologram: OFF"
+
+        msg = message if message else "Waiting for command."
+
+        lines = [
+            gesture_text,
+            body_text,
+            msg,
+        ]
+
+        for i, line in enumerate(lines):
+            surface = self.font_tiny.render(line[:70], True, (155, 175, 180))
+            rect = surface.get_rect(center=(self.W // 2, y + i * 18))
+            self.screen.blit(surface, rect)
+
+    def draw_track(self, track):
+        strip_h = 30
+        y = self.H - strip_h
+
+        strip = pygame.Surface((self.W, strip_h), pygame.SRCALPHA)
+        strip.fill((0, 0, 0, 185))
+        self.screen.blit(strip, (0, y))
+
+        label = "Now playing: " + track
+        if len(label) > 76:
+            label = label[:74] + ".."
+
+        surface = self.font_tiny.render(label, True, (170, 210, 215))
+        self.screen.blit(surface, (14, y + 8))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def get_state_color(self, state):
+        colors = {
+            "standby": (0, 210, 255),
+            "ready": (80, 255, 120),
+            "executing": (255, 80, 230),
+            "error": (255, 80, 80),
+            "waiting": (0, 210, 255),
+            "listening": (80, 255, 120),
+            "acting": (255, 80, 230),
+        }
+
+        return colors.get(state, colors["standby"])
+
+    def dim(self, color, factor):
+        return tuple(max(0, min(255, int(c * factor))) for c in color)
+
+
