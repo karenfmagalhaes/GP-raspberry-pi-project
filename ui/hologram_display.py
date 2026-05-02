@@ -27,8 +27,9 @@ class HologramDisplay:
         "fist": "FIST",
         "three_fingers": "3 FINGERS",
         "peace": "PEACE",
-        "thumbs_up": "THUMBS UP",
-        "thumbs_down": "THUMBS DN",
+        "volume_up": "OK SIGN",
+        "volume_down": "L SIGN",
+        "rock": "ROCK",
         "wake": "WAKE",
     }
 
@@ -539,8 +540,8 @@ class HologramDisplay:
             ("FIST", "Pause"),
             ("THREE FINGERS", "Next track"),
             ("PEACE SIGN", "Previous track"),
-            ("THUMB UP", "Volume up"),
-            ("THUMB DOWN", "Volume down"),
+            ("OK SIGN", "Volume up"),
+            ("L SIGN", "Volume down"),
             ("H VIEW ON", "Camera background visible"),
             ("H VIEW OFF", "Background hidden, gestures active"),
         ]
@@ -561,7 +562,7 @@ class HologramDisplay:
             "Palm facing camera works best",
             "Hand fully visible, 50-60 cm away",
             "Detection: 0.3-0.5 sec",
-            "Hold gesture about 1 sec, wait 1 sec",
+            "Normal gestures 1 sec, volume 1.5 sec",
         ]
 
         tip_y = start_y + len(lines) * 21 + 10

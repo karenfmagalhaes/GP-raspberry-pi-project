@@ -19,8 +19,9 @@ _GESTURE_MESSAGES = {
     "fist": "Paused.",
     "three_fingers": "Next track.",
     "peace": "Previous track.",
-    "thumbs_up": "Volume up.",
-    "thumbs_down": "Volume down.",
+    "volume_up": "Volume up.",
+    "volume_down": "Volume down.",
+    "rock": "Camera view toggled.",
 }
 
 
@@ -134,6 +135,12 @@ def main():
     message = "Hold one finger up to activate."
     action_until = 0.0
 
+    # Volume gestures are easy to confuse with fist/pause, so they must
+    # be held longer before triggering.
+    volume_hold_gesture = None
+    volume_hold_start = 0.0
+    volume_hold_seconds = 1.5
+
     print("HoloBeat — gesture-controlled Spotify hologram interface")
     print("Q = quit")
     print("H = toggle camera background")
@@ -217,8 +224,28 @@ def main():
                         stable = stability.update(detected)
 
                         if stable and cooldown.ready():
+                            # Volume gestures must be held longer because
+                            # thumbs up/down can be confused with fist/pause.
+                            if stable in ("thumbs_up", "thumbs_down"):
+                                if volume_hold_gesture != stable:
+                                    volume_hold_gesture = stable
+                                    volume_hold_start = now
+                                    message = "Hold volume gesture..."
+                                    state = "ready"
+                                    action_until = 0.0
+                                    continue
+
+                                if now - volume_hold_start < volume_hold_seconds:
+                                    message = "Hold volume gesture..."
+                                    state = "ready"
+                                    action_until = 0.0
+                                    continue
+                            else:
+                                volume_hold_gesture = None
+                                volume_hold_start = 0.0
+
                             # UI gestures first:
-                            # shaka = guide, rock = camera view
+                            # rock = camera view
                             ui_result = _execute_ui_gesture(stable, display)
 
                             if ui_result:
