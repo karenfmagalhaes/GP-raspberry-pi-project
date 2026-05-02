@@ -2,12 +2,13 @@
 ui/hologram_display.py
 Clean hologram-style display for HoloBeat.
 
-Adjusted for Raspberry Pi screen:
-- shorter window height so bottom panels fit
-- central hologram moved up slightly
-- bottom panels moved up
-- smaller title and text
-- animated music wave included
+Features:
+- Hologram music assistant interface
+- Gesture guide menu with G
+- Camera background toggle with H
+- Quit with Q
+- System status, gesture status, and now-playing panels
+- Animated hologram orb and music wave
 """
 
 import math
@@ -22,13 +23,13 @@ class HologramDisplay:
     H = 420
 
     _GESTURE_LABELS = {
-        "open_palm":     "OPEN PALM",
-        "fist":          "FIST",
+        "open_palm": "OPEN PALM",
+        "fist": "FIST",
         "three_fingers": "3 FINGERS",
-        "peace":         "PEACE",
-        "thumbs_up":     "THUMBS UP",
-        "thumbs_down":   "THUMBS DN",
-        "wake":          "WAKE",
+        "peace": "PEACE",
+        "thumbs_up": "THUMBS UP",
+        "thumbs_down": "THUMBS DN",
+        "wake": "WAKE",
     }
 
     def __init__(self, fps=12, show_camera=True):
@@ -45,22 +46,25 @@ class HologramDisplay:
         self.action_start_time = time.time()
         self.action_duration = 1.5
 
+        self.show_help = False
+
         self.font_big = pygame.font.SysFont("arial", 64, bold=True)
         self.font_medium = pygame.font.SysFont("arial", 26, bold=True)
         self.font_small = pygame.font.SysFont("arial", 14, bold=True)
         self.font_tiny = pygame.font.SysFont("arial", 11)
-        self.show_help = False
         self.font_help_title = pygame.font.SysFont("arial", 24, bold=True)
         self.font_help = pygame.font.SysFont("arial", 15, bold=True)
 
         self._camera_overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         self._camera_overlay.fill((0, 8, 12, 120))
-        self._panel_surfaces = {}
 
         self._help_overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         self._help_overlay.fill((0, 0, 0, 210))
+
         self._help_panel = pygame.Surface((self.W - 140, self.H - 58), pygame.SRCALPHA)
         self._help_panel.fill((2, 8, 14, 235))
+
+        self._panel_surfaces = {}
 
     # ------------------------------------------------------------------
     # Public API used by main.py
@@ -76,6 +80,10 @@ class HologramDisplay:
         camera_on=False,
         wake_progress=0.0,
     ):
+        # The real UI state for camera background comes from self.show_camera.
+        # The camera still works for gestures even when the background is hidden.
+        view_on = self.show_camera
+
         if state == "executing":
             self.show_action_from_gesture(gesture)
         elif state == "error":
@@ -87,7 +95,7 @@ class HologramDisplay:
             message=message,
             gesture=gesture,
             track=track,
-            camera_on=camera_on,
+            view_on=view_on,
             wake_progress=wake_progress,
         )
 
@@ -102,7 +110,7 @@ class HologramDisplay:
 
                 if event.key == pygame.K_h:
                     return "toggle_body"
-                
+
                 if event.key == pygame.K_g:
                     self.show_help = not self.show_help
 
@@ -143,12 +151,12 @@ class HologramDisplay:
         message="",
         gesture="",
         track="",
-        camera_on=False,
+        view_on=False,
         wake_progress=0.0,
     ):
         self.screen.fill((0, 0, 0))
 
-        if self.show_camera and frame_bgr is not None:
+        if view_on and frame_bgr is not None:
             self.draw_camera_background(frame_bgr)
 
         self.draw_grid()
@@ -165,16 +173,13 @@ class HologramDisplay:
         self.draw_top_title(state)
         self.draw_center_status(message)
         self.draw_system_status_panel(state)
-        self.draw_gesture_panel(gesture, camera_on)
-
-        if track:
-            self.draw_track(track)
-        
+        self.draw_track(track if track else "No track detected")
+        self.draw_gesture_panel(gesture, view_on)
         self.draw_shortcuts()
-        
+
         if self.show_help:
             self.draw_help_menu()
-        
+
         pygame.display.flip()
         self.clock.tick(self.fps)
 
@@ -206,22 +211,22 @@ class HologramDisplay:
             pygame.draw.line(self.screen, grid_color, (0, y), (self.W, y), 1)
 
     def draw_hologram_frame(self):
-        color = (0, 210, 255)
+        cyan = (0, 210, 255)
         magenta = (255, 60, 220)
 
         margin = 12
         length = 44
 
         corners = [
-            ((margin, margin), (1, 1), color),
-            ((self.W - margin, margin), (-1, 1), color),
-            ((margin, self.H - margin), (1, -1), color),
+            ((margin, margin), (1, 1), cyan),
+            ((self.W - margin, margin), (-1, 1), cyan),
+            ((margin, self.H - margin), (1, -1), cyan),
             ((self.W - margin, self.H - margin), (-1, -1), magenta),
         ]
 
-        for (x, y), (dx, dy), c in corners:
-            pygame.draw.line(self.screen, c, (x, y), (x + length * dx, y), 2)
-            pygame.draw.line(self.screen, c, (x, y), (x, y + length * dy), 2)
+        for (x, y), (dx, dy), color in corners:
+            pygame.draw.line(self.screen, color, (x, y), (x + length * dx, y), 2)
+            pygame.draw.line(self.screen, color, (x, y), (x, y + length * dy), 2)
 
     # ------------------------------------------------------------------
     # Hologram centre
@@ -234,7 +239,6 @@ class HologramDisplay:
 
         color = self.get_state_color(state)
 
-        # Rotating particles.
         for i in range(24):
             angle = t * 1.6 + i * (math.pi * 2 / 24)
             radius = 82 + math.sin(t * 2.8 + i) * 8
@@ -243,7 +247,6 @@ class HologramDisplay:
             y = center_y + math.sin(angle) * radius
 
             size = 2 + int(2 * (0.5 + 0.5 * math.sin(t * 3 + i)))
-
             particle_color = (255, 60, 220) if i % 4 == 0 else color
 
             pygame.draw.circle(
@@ -253,23 +256,21 @@ class HologramDisplay:
                 size,
             )
 
-        # Rings.
         pygame.draw.circle(self.screen, self.dim(color, 0.22), (center_x, center_y), 100, 1)
         pygame.draw.circle(self.screen, color, (center_x, center_y), 75, 2)
         pygame.draw.circle(self.screen, (245, 250, 255), (center_x, center_y), 42, 1)
 
-        # Hologram base under orb.
         base_y = center_y + 88
 
-        for r in [36, 25, 15]:
+        for radius in [36, 25, 15]:
             pygame.draw.ellipse(
                 self.screen,
                 self.dim((0, 210, 255), 0.65),
                 (
-                    center_x - r,
-                    base_y - int(r * 0.25),
-                    r * 2,
-                    int(r * 0.5),
+                    center_x - radius,
+                    base_y - int(radius * 0.25),
+                    radius * 2,
+                    int(radius * 0.5),
                 ),
                 1,
             )
@@ -341,9 +342,7 @@ class HologramDisplay:
         rect = text_surface.get_rect(center=(self.W // 2, y))
 
         for offset in [6, 4, 2]:
-            glow_rect = glow_surface.get_rect(
-                center=(self.W // 2 + offset, y + offset)
-            )
+            glow_rect = glow_surface.get_rect(center=(self.W // 2 + offset, y + offset))
             self.screen.blit(glow_surface, glow_rect)
 
         self.screen.blit(text_surface, rect)
@@ -386,8 +385,6 @@ class HologramDisplay:
 
     def draw_center_status(self, message):
         msg = message if message else "Waiting for command."
-
-        # Moved lower, but still above bottom panels.
         y = 315
 
         glow = self.font_small.render(msg[:44], True, (255, 60, 220))
@@ -407,15 +404,16 @@ class HologramDisplay:
 
         self.draw_panel_box(x, y, w, h)
 
-        label = self.font_tiny.render("SYSTEM STATUS", True, (180, 120, 255))
+        label = self.font_tiny.render("SYSTEM", True, (180, 120, 255))
         self.screen.blit(label, (x + 10, y + 7))
 
         state_labels = {
-            "standby":   ("STANDBY", (0, 200, 255)),
-            "ready":     ("ACTIVE",  (80, 255, 140)),
+            "standby": ("STANDBY", (0, 200, 255)),
+            "ready": ("ACTIVE", (80, 255, 140)),
             "executing": ("PLAYING", (255, 80, 230)),
-            "error":     ("ERROR",   (255, 90, 90)),
+            "error": ("ERROR", (255, 90, 90)),
         }
+
         status_text, color = state_labels.get(state, ("STANDBY", (0, 200, 255)))
 
         status = self.font_small.render(status_text, True, color)
@@ -423,7 +421,7 @@ class HologramDisplay:
 
         pygame.draw.circle(self.screen, color, (x + w - 22, y + 28), 5)
 
-    def draw_gesture_panel(self, gesture, camera_on):
+    def draw_gesture_panel(self, gesture, view_on):
         x = self.W - 168
         y = 352
         w = 150
@@ -440,11 +438,11 @@ class HologramDisplay:
         self.screen.blit(label, (x + 10, y + 7))
 
         text = self.font_small.render(gesture_text, True, (80, 255, 140))
-        self.screen.blit(text, (x + 10, y + 23))
+        self.screen.blit(text, (x + 10, y + 22))
 
-        camera_text = "VIEW: ON" if camera_on else "VIEW: OFF"
-        camera_surface = self.font_tiny.render(camera_text, True, (0, 220, 255))
-        self.screen.blit(camera_surface, (x + 10, y + 39))
+        view_text = "VIEW ON" if view_on else "VIEW OFF"
+        view_surface = self.font_tiny.render(view_text, True, (0, 220, 255))
+        self.screen.blit(view_surface, (x + 10, y + 38))
 
     def draw_track(self, track):
         w = 270
@@ -457,10 +455,7 @@ class HologramDisplay:
         label = self.font_tiny.render("NOW PLAYING", True, (255, 80, 220))
         self.screen.blit(label, (x + 10, y + 6))
 
-        text = track
-
-        if len(text) > 30:
-            text = text[:28] + ".."
+        text = track if len(track) <= 30 else track[:28] + ".."
 
         surface = self.font_small.render(text, True, (0, 220, 255))
         self.screen.blit(surface, (x + 10, y + 21))
@@ -483,13 +478,7 @@ class HologramDisplay:
 
             color = (255, 80, 220) if i % 4 == 0 else (0, 220, 255)
 
-            pygame.draw.line(
-                self.screen,
-                color,
-                (bx, y),
-                (bx, y - height),
-                bar_width,
-            )
+            pygame.draw.line(self.screen, color, (bx, y), (bx, y - height), bar_width)
 
     def draw_panel_box(self, x, y, w, h):
         key = (w, h)
@@ -502,20 +491,15 @@ class HologramDisplay:
         self.screen.blit(self._panel_surfaces[key], (x, y))
 
         pygame.draw.rect(self.screen, (255, 60, 220), (x, y, w, h), 1)
-        pygame.draw.rect(
-            self.screen,
-            (0, 220, 255),
-            (x + 3, y + 3, w - 6, h - 6),
-            1,
-        )
+        pygame.draw.rect(self.screen, (0, 220, 255), (x + 3, y + 3, w - 6, h - 6), 1)
 
     # ------------------------------------------------------------------
     # Guide menu
     # ------------------------------------------------------------------
 
     def draw_shortcuts(self):
-        text = "G: Guide   H: Camera   Q: Quit"
-        surface = self.font_tiny.render(text, True, (120, 220, 235))
+        text = "G Guide   H View   Q Quit"
+        surface = self.font_tiny.render(text, True, (145, 235, 245))
         self.screen.blit(surface, (18, 18))
 
     def draw_help_menu(self):
@@ -545,15 +529,15 @@ class HologramDisplay:
         self.screen.blit(title, title_rect)
 
         lines = [
-            ("ACTIVATE",      "Hold one finger up"),
-            ("OPEN PALM",     "Play"),
-            ("FIST",          "Pause"),
+            ("ACTIVATE", "Hold one finger up"),
+            ("OPEN PALM", "Play"),
+            ("FIST", "Pause"),
             ("THREE FINGERS", "Next track"),
-            ("PEACE SIGN",    "Previous track"),
-            ("THUMB UP",      "Volume up"),
-            ("THUMB DOWN",    "Volume down"),
-            ("H: VIEW ON",    "Camera background visible"),
-            ("H: VIEW OFF",   "Background hidden, gestures active"),
+            ("PEACE SIGN", "Previous track"),
+            ("THUMB UP", "Volume up"),
+            ("THUMB DOWN", "Volume down"),
+            ("H VIEW ON", "Camera background visible"),
+            ("H VIEW OFF", "Background hidden, gestures active"),
         ]
 
         start_y = y + 60
@@ -595,10 +579,10 @@ class HologramDisplay:
 
     def get_state_color(self, state):
         colors = {
-            "standby":   (0, 210, 255),
-            "ready":     (80, 255, 120),
+            "standby": (0, 210, 255),
+            "ready": (80, 255, 120),
             "executing": (255, 80, 230),
-            "error":     (255, 80, 80),
+            "error": (255, 80, 80),
         }
 
         return colors.get(state, colors["standby"])
