@@ -1,2 +1,7 @@
 requests
 spotipy
+picamera2
+opencv-python
+mediapipe
+python-dotenv
+pygame

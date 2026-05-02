@@ -1,76 +1,108 @@
+import math
+
+
 class GestureClassifier:
-    def __init__(self):
-        pass
+    """
+    Rule-based hand gesture classifier using MediaPipe hand landmarks.
+
+    Gestures:
+    - wake = one finger up
+    - open_palm = play
+    - fist = pause
+    - three_fingers = next
+    - peace = previous
+    - thumbs_up / thumbs_down = volume
+    - shaka = open/close guide
+    - rock = camera view on/off
+    """
 
     def classify(self, hand_landmarks):
-        landmarks = hand_landmarks.landmark
+        lm = hand_landmarks.landmark
 
-        # Index, middle, ring, pinky
-        tips = [8, 12, 16, 20]
-        fingers_up = []
+        def dist(a, b):
+            return math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y)
 
-        for tip in tips:
-            if landmarks[tip].y < landmarks[tip - 2].y:
-                fingers_up.append(1)
-            else:
-                fingers_up.append(0)
+        # Main finger states.
+        index_up = lm[8].y < lm[6].y
+        middle_up = lm[12].y < lm[10].y
+        ring_up = lm[16].y < lm[14].y
+        pinky_up = lm[20].y < lm[18].y
 
-        total_fingers = sum(fingers_up)
+        index_down = not index_up
+        middle_down = not middle_up
+        ring_down = not ring_up
+        pinky_down = not pinky_up
 
-        thumb_tip = landmarks[4]
-        thumb_ip = landmarks[3]
-        thumb_mcp = landmarks[2]
-        wrist = landmarks[0]
+        # Thumb landmarks.
+        thumb_tip = lm[4]
+        thumb_ip = lm[3]
+        thumb_mcp = lm[2]
+        wrist = lm[0]
 
-        thumb_up = (
-            thumb_tip.y < thumb_ip.y < thumb_mcp.y and
-            thumb_tip.y < wrist.y
-        )
+        # Thumb extension checks.
+        thumb_sideways = abs(thumb_tip.x - thumb_mcp.x) > 0.055
+        thumb_long = dist(4, 2) > dist(3, 2) * 1.15
+        thumb_extended = thumb_sideways or thumb_long
 
-        thumb_down = (
-            thumb_tip.y > thumb_ip.y > thumb_mcp.y and
-            thumb_tip.y > wrist.y
-        )
+        # More relaxed pinky extension for shaka/rock.
+        pinky_long = dist(20, 17) > dist(18, 17) * 1.15
+        pinky_extended = pinky_up or pinky_long
 
-        index_down = landmarks[8].y > landmarks[6].y
-        middle_down = landmarks[12].y > landmarks[10].y
-        ring_down = landmarks[16].y > landmarks[14].y
-        pinky_down = landmarks[20].y > landmarks[18].y
+        # ------------------------------------------------------------
+        # Interface gestures first
+        # ------------------------------------------------------------
 
-        all_other_fingers_down = index_down and middle_down and ring_down and pinky_down
+        # 🤙 Shaka: thumb + pinky extended, index/middle/ring folded.
+        if thumb_extended and pinky_extended and index_down and middle_down and ring_down:
+            return None  # shaka disabled because it opens guide by accident
 
-        # thumbs up
-        if thumb_up and all_other_fingers_down:
-            return "thumbs_up"
+        # 🤘 Rock: index + pinky extended, middle/ring folded.
+        if index_up and pinky_extended and middle_down and ring_down:
+            return "rock"
 
-        # thumbs down
-        if thumb_down and all_other_fingers_down:
-            return "thumbs_down"
+        # ------------------------------------------------------------
+        # Spotify gestures
+        # ------------------------------------------------------------
 
-        # open palm
-        if total_fingers == 4:
+        # Open palm.
+        if index_up and middle_up and ring_up and pinky_up:
             return "open_palm"
 
-        # fist
-        if total_fingers == 0 and not thumb_up and not thumb_down:
+        # Fist / thumbs.
+        # IMPORTANT:
+        # Pause was getting confused with volume, so thumbs_up/down must be
+        # very clear. Otherwise, a closed hand is treated as fist = pause.
+        if index_down and middle_down and ring_down and pinky_down:
+            clear_thumb_up = (
+                thumb_extended
+                and thumb_tip.y < wrist.y - 0.13
+                and thumb_tip.y < thumb_mcp.y - 0.08
+            )
+
+            clear_thumb_down = (
+                thumb_extended
+                and thumb_tip.y > wrist.y + 0.18
+                and thumb_tip.y > thumb_mcp.y + 0.08
+            )
+
+            if clear_thumb_up:
+                return "thumbs_up"
+
+            if clear_thumb_down:
+                return "thumbs_down"
+
             return "fist"
 
-        # peace
-        if (
-            fingers_up[0] == 1 and
-            fingers_up[1] == 1 and
-            fingers_up[2] == 0 and
-            fingers_up[3] == 0
-        ):
+        # Three fingers = next.
+        if index_up and middle_up and ring_up and pinky_down:
+            return "three_fingers"
+
+        # Peace = previous.
+        if index_up and middle_up and ring_down and pinky_down:
             return "peace"
 
-        # three fingers
-        if (
-            fingers_up[0] == 1 and
-            fingers_up[1] == 1 and
-            fingers_up[2] == 1 and
-            fingers_up[3] == 0
-        ):
-            return "three_fingers"
+        # Wake = only index up.
+        if index_up and middle_down and ring_down and pinky_down:
+            return "wake"
 
         return None
