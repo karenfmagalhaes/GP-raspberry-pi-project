@@ -1,9 +1,3 @@
-# main.py
-# Raspberry Pi Spotify gesture controller with Sendo virtual assistant.
-# Includes camera, hand gesture recognition, Spotify controls,
-# wake gesture activation, Spotify cooldown,
-# and optional hologram/body visualizer mode.
-
 import json
 import time
 from pathlib import Path
@@ -18,287 +12,247 @@ from vision.pose_visualizer import PoseVisualizer
 from utils.cooldown import Cooldown
 from spotify.controller import SpotifyController
 from utils.gesture_stability import GestureStability
-from ui.overlay import draw_overlay, draw_hologram_status
-from ui.virtual_assistant import draw_virtual_assistant
+from ui.hologram_display import HologramDisplay
 
 
-# Maps stable gestures to the Sendo assistant message shown on action.
-GESTURE_MESSAGES = {
-    "open_palm":     "Playing your music.",
-    "fist":          "Music paused.",
-    "three_fingers": "Skipping to next track.",
-    "peace":         "Going back one track.",
-    "thumbs_up":     "Increasing volume.",
-    "thumbs_down":   "Decreasing volume.",
+_GESTURE_MESSAGES = {
+    "open_palm":     "Playing.",
+    "fist":          "Paused.",
+    "three_fingers": "Next track.",
+    "peace":         "Previous track.",
+    "thumbs_up":     "Volume up.",
+    "thumbs_down":   "Volume down.",
 }
 
 
-def load_gesture_map():
-    base_dir = Path(__file__).resolve().parent
-    gestures_file = base_dir / "config" / "gestures.json"
-
-    with open(gestures_file, "r", encoding="utf-8") as file:
-        return json.load(file)
+def _load_gesture_map():
+    path = Path(__file__).resolve().parent / "config" / "gestures.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def execute_action(mapped_action, spotify):
+def _execute(mapped_action, spotify):
     if mapped_action == "play":
         return spotify.play()
-
     if mapped_action == "pause":
         return spotify.pause()
-
     if mapped_action == "next_track":
         return spotify.next_track()
-
     if mapped_action == "previous_track":
         return spotify.previous_track()
-
     if mapped_action == "volume_up":
         return spotify.volume_up()
-
     if mapped_action == "volume_down":
         return spotify.volume_down()
-
     return "No action mapped"
 
 
-def _is_error_result(result):
+def _is_error(result):
     r = result.lower()
-    return (
-        "error" in r
-        or "no active" in r
-        or "not allowed" in r
-        or "restricted" in r
-        or "does not support" in r
-    )
+    return any(k in r for k in ("error", "no active", "not allowed",
+                                "restricted", "does not support"))
 
 
 def main():
-    # Lower framerate helps reduce delay on Raspberry Pi.
-    camera = CameraCapture(width=640, height=480, framerate=12, autofocus=True)
+    camera      = CameraCapture(width=640, height=480, framerate=12, rotation=90, autofocus=True)
+    tracker     = HandTracker()
+    classifier  = GestureClassifier()
+    pose_vis    = PoseVisualizer()
+    cooldown    = Cooldown(delay=1.0)
+    stability   = GestureStability(required_frames=3)
+    spotify     = SpotifyController()
+    gesture_map = _load_gesture_map()
 
-    tracker = HandTracker()
-    classifier = GestureClassifier()
-    pose_visualizer = PoseVisualizer()
+    # Pygame hologram window: camera shows as a ghost background.
+    display = HologramDisplay(fps=12, show_camera=True)
 
-    # Faster gesture reaction.
-    cooldown = Cooldown(delay=1.0)
-    stability = GestureStability(required_frames=3)
-
-    spotify = SpotifyController()
-    gesture_map = load_gesture_map()
-
-    # ------------------------------------------------------------
-    # Wake gesture settings
-    # ------------------------------------------------------------
-    gesture_controls_active = False
+    gesture_active   = False
     last_active_time = 0.0
-
-    ACTIVE_TIMEOUT = 10.0  # seconds before controls turn OFF again
-    wake_detector = HoldDetector("wake", hold_seconds=1.5)
+    ACTIVE_TIMEOUT   = 10.0
+    wake_detector    = HoldDetector("wake", hold_seconds=1.5)
 
     if not camera.is_opened():
-        print("Could not open camera")
+        print("[HoloBeat] Could not open camera.")
+        display.close()
         return
 
     current_gesture = "No hand"
-    current_action = "Controls OFF - hold wake gesture"
-    current_track = ""
-
-    # Refresh "now playing" every 5 seconds; set to 0 to force an immediate first fetch.
+    current_track   = ""
     last_track_time = 0.0
-    track_refresh_interval = 5.0
 
-    # Hologram starts ON because it is part of your project idea.
-    hologram_enabled = True
+    # Body hologram is OFF by default — press H to enable.
+    # Pose runs every 2 frames (6 updates/s at 12 FPS) for smoother hologram.
+    body_on             = False
+    pose_every_n_frames = 2
+    frame_count         = 0
+    last_pose_results   = None
 
-    # Process pose every few frames only to reduce delay.
-    pose_every_n_frames = 3
-    frame_count = 0
-    last_pose_results = None
+    # States: standby | ready | executing | error
+    state        = "standby"
+    message      = "Hold one finger up to activate."
+    action_until = 0.0
 
-    # ------------------------------------------------------------
-    # Sendo assistant state
-    # ------------------------------------------------------------
-    assistant_state   = "sleeping"
-    assistant_message = "Hold one finger up to wake me."
-    action_display_until = 0.0  # when to revert from action/error back to listening
-
-    print("Project started.")
-    print("Press Q to quit.")
-    print("Press H to turn hologram on/off.")
-    print("Gesture controls are OFF.")
-    print("Hold the wake gesture to activate Spotify controls.")
+    print("HoloBeat  —  gesture-controlled Spotify interface")
+    print("  H  toggle hologram body  (transforms camera into glowing figure)")
+    print("  Q  quit")
+    print("  Hold index finger up for 1.5 s to activate gesture controls.")
 
     try:
         while True:
             ret, frame = camera.read_frame()
-
             if not ret:
-                print("Could not read frame")
+                print("[HoloBeat] Camera read failed.")
                 break
 
             frame_count += 1
-            now = time.time()
-
-            # Mirror image, easier for gesture control.
+            now   = time.time()
             frame = cv2.flip(frame, 1)
 
-            # Hand tracking runs every frame because gestures need fast response.
             hand_results = tracker.process(frame)
 
-            # Hologram/body pose runs only every 3 frames to reduce delay.
-            if hologram_enabled:
+            # Body hologram: update pose every N frames, apply transform every frame.
+            if body_on:
                 if frame_count % pose_every_n_frames == 0:
-                    last_pose_results = pose_visualizer.process(frame)
+                    last_pose_results = pose_vis.process(frame)
+                # draw_hologram_body handles missing results gracefully
+                # (returns darkened background with grid/corners only).
+                frame = pose_vis.draw_hologram_body(frame, last_pose_results, state)
 
-                if last_pose_results:
-                    frame = pose_visualizer.draw_glow_pose(frame, last_pose_results)
-
-            detected_gesture = None
-
+            # Classify gesture; only draw raw landmarks when hologram is OFF
+            # (hologram body provides its own hand visualization).
+            detected = None
             if hand_results.multi_hand_landmarks:
-                for hand_landmarks in hand_results.multi_hand_landmarks:
-                    tracker.draw_landmarks(frame, hand_landmarks)
+                for lm in hand_results.multi_hand_landmarks:
+                    if not body_on:
+                        tracker.draw_landmarks(frame, lm)
+                    detected = classifier.classify(lm)
 
-                    gesture = classifier.classify(hand_landmarks)
-                    detected_gesture = gesture
-
-            # ------------------------------------------------------------
-            # Auto-disable controls after inactivity
-            # ------------------------------------------------------------
-            if gesture_controls_active and now - last_active_time > ACTIVE_TIMEOUT:
-                gesture_controls_active = False
-                current_action = "Controls OFF - hold wake gesture"
-                assistant_state   = "sleeping"
-                assistant_message = "I am sleeping again."
-                action_display_until = 0.0
+            # ----------------------------------------------------------------
+            # Auto-lock after inactivity
+            # ----------------------------------------------------------------
+            if gesture_active and now - last_active_time > ACTIVE_TIMEOUT:
+                gesture_active = False
+                state          = "standby"
+                message        = "Gesture controls locked again."
+                action_until   = 0.0
                 wake_detector.reset()
                 stability.reset()
-                print("[System] Gesture controls OFF - timeout")
+                print("[HoloBeat] Standby — timeout")
 
-            # ------------------------------------------------------------
-            # Gesture detected
-            # ------------------------------------------------------------
-            if detected_gesture:
-                current_gesture = detected_gesture
+            # ----------------------------------------------------------------
+            # Gesture processing
+            # ----------------------------------------------------------------
+            if detected:
+                current_gesture = detected
 
-                # --------------------------------------------------------
-                # If controls are OFF, only listen for wake gesture
-                # --------------------------------------------------------
-                if not gesture_controls_active:
-                    if wake_detector.update(detected_gesture):
-                        gesture_controls_active = True
+                if not gesture_active:
+                    if wake_detector.update(detected):
+                        gesture_active   = True
                         last_active_time = now
-                        current_action = "Controls ON - ready"
-                        assistant_state   = "listening"
-                        assistant_message = "I am listening. Show me a Spotify gesture."
-                        action_display_until = 0.0
+                        state            = "ready"
+                        message          = "Gesture controls active."
+                        action_until     = 0.0
                         wake_detector.reset()
                         stability.reset()
                         cooldown.reset()
-                        print("[System] Gesture controls ON")
+                        print("[HoloBeat] Controls active")
+                    elif state != "error":
+                        state = "standby"
+                        if detected == "wake" and wake_detector.start_time is not None:
+                            message = "Hold still..."
+                        else:
+                            message = "Hold one finger up to activate."
 
-                    else:
-                        current_action = "Controls OFF - hold wake gesture"
-
-                # --------------------------------------------------------
-                # If controls are ON, allow normal Spotify gestures
-                # --------------------------------------------------------
                 else:
-                    # Do not execute the wake gesture as a Spotify action.
-                    if detected_gesture == "wake":
-                        current_action = "Controls ON - ready"
+                    if detected == "wake":
+                        last_active_time = now   # keep controls alive
                     else:
-                        stable_gesture = stability.update(detected_gesture)
+                        stable = stability.update(detected)
+                        if stable and cooldown.ready():
+                            mapped = gesture_map.get(stable, "no_action")
+                            result = _execute(mapped, spotify)
 
-                        if stable_gesture and cooldown.ready():
-                            mapped_action = gesture_map.get(stable_gesture, "no_action")
-                            result = execute_action(mapped_action, spotify)
-                            current_action = result
-
-                            if _is_error_result(result):
-                                assistant_state   = "error"
-                                assistant_message = result
-                                action_display_until = now + 4.0
+                            if _is_error(result):
+                                state        = "error"
+                                message      = result
+                                action_until = now + 4.0
                             else:
-                                assistant_state   = "action"
-                                assistant_message = GESTURE_MESSAGES.get(stable_gesture, "Done.")
-                                action_display_until = now + 3.0
+                                state        = "executing"
+                                message      = _GESTURE_MESSAGES.get(stable, "Done.")
+                                action_until = now + 3.0
 
-                            print(f"Gesture: {stable_gesture} -> Action: {result}")
-
+                            print(f"[HoloBeat] {stable} -> {result}")
                             last_active_time = now
                             stability.reset()
                             cooldown.reset()
 
-                            # Force track refresh after actions that change the song.
-                            if mapped_action in ("next_track", "previous_track", "play"):
+                            if mapped in ("next_track", "previous_track", "play"):
                                 last_track_time = 0.0
 
-            # ------------------------------------------------------------
-            # No hand detected
-            # ------------------------------------------------------------
             else:
                 current_gesture = "No hand"
                 stability.reset()
                 wake_detector.reset()
 
-                if gesture_controls_active:
-                    current_action = "Controls ON - waiting for gesture"
-                else:
-                    current_action = "Controls OFF - hold wake gesture"
+                if not gesture_active and state not in ("executing", "error", "ready"):
+                    state   = "standby"
+                    message = "Hold one finger up to activate."
 
-            # ------------------------------------------------------------
-            # Revert action/error display back to listening (or sleeping)
-            # ------------------------------------------------------------
-            if assistant_state in ("action", "error") and now > action_display_until:
-                if gesture_controls_active:
-                    assistant_state   = "listening"
-                    assistant_message = "I am listening. Show me a Spotify gesture."
+            # ----------------------------------------------------------------
+            # Revert executing / error back to idle
+            # ----------------------------------------------------------------
+            if state in ("executing", "error") and now > action_until:
+                if gesture_active:
+                    state   = "ready"
+                    message = "Gesture controls active."
                 else:
-                    assistant_state   = "sleeping"
-                    assistant_message = "Hold one finger up to wake me."
+                    state   = "standby"
+                    message = "Hold one finger up to activate."
 
-            # ------------------------------------------------------------
-            # Refresh the now-playing track on a timer
-            # ------------------------------------------------------------
-            if now - last_track_time >= track_refresh_interval:
-                current_track = spotify.get_current_track()
+            # ----------------------------------------------------------------
+            # Refresh now-playing track
+            # ----------------------------------------------------------------
+            if now - last_track_time >= 5.0:
+                current_track   = spotify.get_current_track()
                 last_track_time = now
 
-            # ------------------------------------------------------------
-            # Draw UI
-            # ------------------------------------------------------------
-            frame = draw_overlay(frame, current_gesture, current_action, current_track)
-            frame = draw_hologram_status(frame, hologram_enabled)
-            frame = draw_virtual_assistant(
+            # Wake hold progress (0.0 – 1.0) for the arc around the orb.
+            wake_progress = 0.0
+            if wake_detector.start_time is not None and not gesture_active:
+                wake_progress = min(
+                    1.0,
+                    (now - wake_detector.start_time) / wake_detector.hold_seconds,
+                )
+
+            # ----------------------------------------------------------------
+            # Render — pygame hologram display
+            # ----------------------------------------------------------------
+            display.draw(
                 frame,
-                assistant_state,
-                assistant_message,
+                state,
+                message,
                 gesture=current_gesture,
-                action=current_action,
                 track=current_track,
+                body_on=body_on,
+                wake_progress=wake_progress,
             )
 
-            cv2.imshow("Gesture Spotify Player", frame)
-
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == ord("q"):
+            # ----------------------------------------------------------------
+            # Input — handled by pygame event loop
+            # ----------------------------------------------------------------
+            cmd = display.poll()
+            if cmd == "quit":
                 break
-
-            if key == ord("h"):
-                hologram_enabled = not hologram_enabled
-                print(f"Hologram mode: {'ON' if hologram_enabled else 'OFF'}")
+            if cmd == "toggle_body":
+                body_on = not body_on
+                print(f"[HoloBeat] Body skeleton {'ON' if body_on else 'OFF'}")
 
     finally:
         camera.release()
         tracker.close()
-        pose_visualizer.close()
-        cv2.destroyAllWindows()
-        print("Project closed.")
+        pose_vis.close()
+        display.close()
+        print("[HoloBeat] Closed.")
 
 
 if __name__ == "__main__":

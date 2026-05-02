@@ -1,78 +1,36 @@
-# ui/overlay.py
-# Draws gesture and Spotify action information on top of the camera frame.
-
 import cv2
 
 
-def draw_overlay(frame, gesture_text, action_text, track_text=""):
-    # Gesture text
-    cv2.putText(
-        frame,
-        f"Gesture: {gesture_text}",
-        (20, 40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 0),
-        2
-    )
+def _glass(frame, x1, y1, x2, y2, alpha=0.52):
+    ov = frame.copy()
+    cv2.rectangle(ov, (x1, y1), (x2, y2), (8, 8, 12), -1)
+    cv2.addWeighted(ov, alpha, frame, 1 - alpha, 0, frame)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (50, 50, 55), 1)
 
-    # Spotify action text
-    cv2.putText(
-        frame,
-        f"Action: {action_text}",
-        (20, 80),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (255, 255, 0),
-        2
-    )
 
-    # Quit instruction
-    cv2.putText(
-        frame,
-        "Press Q to quit",
-        (20, 120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (0, 200, 255),
-        2
-    )
+def _small(frame, text, x, y, color=(150, 150, 150), scale=0.34):
+    cv2.putText(frame, text, (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
 
-    if track_text:
-        cv2.putText(
-            frame,
-            f"Now playing: {track_text}",
-            (20, 455),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 255, 255),
-            2
-        )
+
+def draw_overlay(frame, gesture, action, track=""):
+    # Only show a gesture badge when a hand is actually detected.
+    if not gesture or gesture == "No hand":
+        return frame
+
+    x1, y1, x2, y2 = 10, 10, 178, 34
+    _glass(frame, x1, y1, x2, y2)
+    _small(frame, gesture[:28], x1 + 9, y1 + 17)
 
     return frame
 
 
 def draw_hologram_status(frame, hologram_enabled):
-    status = "Hologram: ON" if hologram_enabled else "Hologram: OFF"
+    label = "Body: ON" if hologram_enabled else "Body: OFF"
+    color = (75, 155, 75) if hologram_enabled else (95, 95, 95)
 
-    cv2.putText(
-        frame,
-        status,
-        (20, 160),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 0, 255),
-        2
-    )
-
-    cv2.putText(
-        frame,
-        "Press H to toggle hologram",
-        (20, 195),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 0, 255),
-        2
-    )
+    x1, y1, x2, y2 = 10, 40, 96, 60
+    _glass(frame, x1, y1, x2, y2)
+    _small(frame, label, x1 + 8, y1 + 14, color=color, scale=0.30)
 
     return frame
