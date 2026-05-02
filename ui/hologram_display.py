@@ -488,10 +488,12 @@ class HologramDisplay:
 
     def draw_panel_box(self, x, y, w, h):
         key = (w, h)
+
         if key not in self._panel_surfaces:
-            s = pygame.Surface((w, h), pygame.SRCALPHA)
-            s.fill((0, 0, 0, 175))
-            self._panel_surfaces[key] = s
+            surface = pygame.Surface((w, h), pygame.SRCALPHA)
+            surface.fill((0, 0, 0, 175))
+            self._panel_surfaces[key] = surface
+
         self.screen.blit(self._panel_surfaces[key], (x, y))
 
         pygame.draw.rect(self.screen, (255, 60, 220), (x, y, w, h), 1)
@@ -502,73 +504,89 @@ class HologramDisplay:
             1,
         )
 
-        def draw_shortcuts(self):
-    text = "G: Guide   H: Camera   Q: Quit"
-    surface = self.font_tiny.render(text, True, (120, 220, 235))
-    self.screen.blit(surface, (18, 18))
-    
+    # ------------------------------------------------------------------
+    # Guide menu
+    # ------------------------------------------------------------------
+
+    def draw_shortcuts(self):
+        text = "G: Guide   H: Camera   Q: Quit"
+        surface = self.font_tiny.render(text, True, (120, 220, 235))
+        self.screen.blit(surface, (18, 18))
+
     def draw_help_menu(self):
-    overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 210))
-    self.screen.blit(overlay, (0, 0))
+        overlay = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        self.screen.blit(overlay, (0, 0))
 
-    x = 70
-    y = 55
-    w = self.W - 140
-    h = self.H - 95
+        x = 70
+        y = 38
+        w = self.W - 140
+        h = self.H - 58
 
-    panel = pygame.Surface((w, h), pygame.SRCALPHA)
-    panel.fill((2, 8, 14, 235))
-    self.screen.blit(panel, (x, y))
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((2, 8, 14, 235))
+        self.screen.blit(panel, (x, y))
 
-    pygame.draw.rect(self.screen, (0, 220, 255), (x, y, w, h), 2)
-    pygame.draw.rect(self.screen, (255, 60, 220), (x + 5, y + 5, w - 10, h - 10), 1)
+        pygame.draw.rect(self.screen, (0, 220, 255), (x, y, w, h), 2)
+        pygame.draw.rect(
+            self.screen,
+            (255, 60, 220),
+            (x + 5, y + 5, w - 10, h - 10),
+            1,
+        )
 
-    title = self.font_help_title.render("HOLOBEAT GESTURE GUIDE", True, (0, 220, 255))
-    title_rect = title.get_rect(center=(self.W // 2, y + 32))
-    self.screen.blit(title, title_rect)
+        title = self.font_help_title.render(
+            "HOLOBEAT GESTURE GUIDE",
+            True,
+            (0, 220, 255),
+        )
+        title_rect = title.get_rect(center=(self.W // 2, y + 27))
+        self.screen.blit(title, title_rect)
 
-    lines = [
-        ("ACTIVATE", "Hold one finger up = activate controls"),
-        ("OPEN PALM", "Play"),
-        ("FIST", "Pause"),
-        ("PEACE SIGN", "Next track"),
-        ("THREE FINGERS", "Previous track"),
-        ("THUMB UP", "Volume up"),
-        ("THUMB DOWN", "Volume down"),
-        ("CAMERA ON", "Gestures work"),
-        ("CAMERA OFF", "Gestures disabled"),
-    ]
+        lines = [
+            ("ACTIVATE", "Hold one finger up"),
+            ("OPEN PALM", "Play"),
+            ("FIST", "Pause"),
+            ("PEACE SIGN", "Next track"),
+            ("THREE FINGERS", "Previous track"),
+            ("THUMB UP", "Volume up"),
+            ("THUMB DOWN", "Volume down"),
+            ("CAMERA ON", "Gestures work"),
+            ("CAMERA OFF", "Gestures disabled"),
+        ]
 
-    start_y = y + 72
+        start_y = y + 60
 
-    for i, (gesture, action) in enumerate(lines):
-        row_y = start_y + i * 24
+        for i, (gesture_name, action) in enumerate(lines):
+            row_y = start_y + i * 21
+            colour = (255, 80, 220) if i in (1, 2, 3, 4, 5, 6) else (0, 220, 255)
 
-        colour = (255, 80, 220) if i in (1, 2, 3, 4, 5, 6) else (0, 220, 255)
+            gesture_surface = self.font_help.render(gesture_name, True, colour)
+            action_surface = self.font_help.render(action, True, (230, 240, 245))
 
-        gesture_surface = self.font_help.render(gesture, True, colour)
-        action_surface = self.font_help.render(action, True, (230, 240, 245))
+            self.screen.blit(gesture_surface, (x + 32, row_y))
+            self.screen.blit(action_surface, (x + 190, row_y))
 
-        self.screen.blit(gesture_surface, (x + 35, row_y))
-        self.screen.blit(action_surface, (x + 190, row_y))
+        tips = [
+            "Palm facing camera",
+            "Hand fully visible",
+            "Stay around 50-60 cm away",
+            "Hold gesture still for 1 second",
+        ]
 
-    tips = [
-        "Tip: show your palm to the camera.",
-        "Keep your hand fully visible.",
-        "Stay around 50-60 cm away.",
-        "Hold each gesture still for about 1 second.",
-    ]
+        tip_y = start_y + len(lines) * 21 + 10
 
-    tip_y = start_y + len(lines) * 24 + 18
+        for i, tip in enumerate(tips):
+            surface = self.font_tiny.render(tip, True, (150, 220, 235))
+            self.screen.blit(surface, (x + 32, tip_y + i * 15))
 
-    for i, tip in enumerate(tips):
-        surface = self.font_tiny.render(tip, True, (150, 220, 235))
-        self.screen.blit(surface, (x + 35, tip_y + i * 18))
-
-    footer = self.font_tiny.render("Press G again to close this guide.", True, (255, 80, 220))
-    footer_rect = footer.get_rect(center=(self.W // 2, y + h - 22))
-    self.screen.blit(footer, footer_rect)
+        footer = self.font_tiny.render(
+            "Press G again to close this guide.",
+            True,
+            (255, 80, 220),
+        )
+        footer_rect = footer.get_rect(center=(self.W // 2, y + h - 14))
+        self.screen.blit(footer, footer_rect)
 
     # ------------------------------------------------------------------
     # Helpers
