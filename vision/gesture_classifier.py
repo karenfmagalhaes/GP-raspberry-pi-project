@@ -3,7 +3,7 @@ import math
 
 class GestureClassifier:
     """
-    Static gesture classifier for HoloBeat.
+    Static gesture classifier for WaveBeat.
 
     Returns one of: rock, ok, open_palm, peace, fist, one_finger, or None.
 

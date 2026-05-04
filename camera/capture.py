@@ -1,8 +1,11 @@
 # camera/capture.py
-# Camera capture using rpicam-vid MJPEG stream.
-# This avoids Picamera2 Python binding problems in custom Python/pyenv environments.
+# Camera capture wrapper.
+# Raspberry Pi: uses rpicam-vid/libcamera-vid MJPEG stream.
+# Windows/laptop test: uses OpenCV webcam.
+# This allows testing in VS Code without changing main.py.
 
 import os
+import platform
 import select
 import shutil
 import subprocess
@@ -30,20 +33,33 @@ class CameraCapture:
         self.autofocus = autofocus
 
         self.process = None
+        self.cap = None
         self.buffer = bytearray()
         self.opened = False
+        self.mode = None
+        self.camera_command = None
 
         # ~1 MB is far larger than any 640x480 MJPEG frame.
         # If the buffer ever exceeds this, the stream is corrupt.
         self._max_buffer = 1 * 1024 * 1024
 
-        self.camera_command = self._find_camera_command()
+        system_name = platform.system().lower()
 
-        if not self.camera_command:
-            print("Camera command not found. Install/use rpicam-apps.")
+        # Windows / VS Code local testing.
+        if system_name == "windows" or os.getenv("FORCE_WEBCAM") == "1":
+            self._start_webcam()
             return
 
-        self._start_camera_stream()
+        # Raspberry Pi / Linux: try rpicam/libcamera first.
+        self.camera_command = self._find_camera_command()
+
+        if self.camera_command:
+            self._start_camera_stream()
+            return
+
+        # Linux laptop fallback.
+        print("[Camera] rpicam/libcamera not found. Using OpenCV webcam.")
+        self._start_webcam()
 
     def _find_camera_command(self):
         if shutil.which("rpicam-vid"):
@@ -53,6 +69,10 @@ class CameraCapture:
             return "libcamera-vid"
 
         return None
+
+    # ------------------------------------------------------------
+    # Raspberry Pi camera mode
+    # ------------------------------------------------------------
 
     def _start_camera_stream(self):
         command = [
@@ -67,7 +87,7 @@ class CameraCapture:
         ]
 
         if self.autofocus:
-            # CM3 continuous autofocus — keeps focus sharp as the hand moves.
+            # Camera Module 3 continuous autofocus.
             command += ["--autofocus-mode", "continuous"]
 
         try:
@@ -81,33 +101,19 @@ class CameraCapture:
             time.sleep(2)
 
             if self.process.poll() is not None:
-                print("Camera stream failed to start.")
+                print("[Camera] Raspberry Pi camera stream failed to start.")
                 self.opened = False
                 return
 
+            self.mode = "rpicam"
             self.opened = True
-            print("Camera stream started successfully")
+            print("[Camera] Raspberry Pi camera stream started successfully")
 
         except Exception as e:
-            print(f"Camera failed to start: {e}")
+            print(f"[Camera] Raspberry Pi camera failed to start: {e}")
             self.opened = False
 
-    def _apply_rotation(self, frame):
-        if self.rotation == 90:
-            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
-        if self.rotation == 180:
-            return cv2.rotate(frame, cv2.ROTATE_180)
-
-        if self.rotation == 270:
-            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        return frame
-
-    def is_opened(self):
-        return self.opened
-
-    def read_frame(self):
+    def _read_rpicam_frame(self):
         if not self.opened or self.process is None or self.process.stdout is None:
             return False, None
 
@@ -115,7 +121,7 @@ class CameraCapture:
 
         while time.time() - start_time < 3:
             if self.process.poll() is not None:
-                print("Camera process ended unexpectedly.")
+                print("[Camera] Camera process ended unexpectedly.")
                 self.opened = False
                 return False, None
 
@@ -136,7 +142,6 @@ class CameraCapture:
                     self.buffer.clear()
                     continue
 
-                # Drop any bytes that arrived before the first JPEG SOI marker.
                 jpg_start = self.buffer.find(b"\xff\xd8")
 
                 if jpg_start == -1:
@@ -145,8 +150,6 @@ class CameraCapture:
                 if jpg_start > 0:
                     del self.buffer[:jpg_start]
 
-                # Drain ALL complete JPEG frames from the buffer and keep only
-                # the newest one. This reduces visible camera lag.
                 latest_frame = None
 
                 while True:
@@ -177,8 +180,75 @@ class CameraCapture:
                     return True, latest_frame
 
             except Exception as e:
-                print(f"Failed to read frame: {e}")
+                print(f"[Camera] Failed to read Raspberry Pi frame: {e}")
                 return False, None
+
+        return False, None
+
+    # ------------------------------------------------------------
+    # Windows / laptop webcam mode
+    # ------------------------------------------------------------
+
+    def _start_webcam(self):
+        print("[Camera] Using OpenCV webcam for VS Code testing")
+
+        system_name = platform.system().lower()
+
+        if system_name == "windows":
+            self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        else:
+            self.cap = cv2.VideoCapture(self.camera_index)
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_FPS, self.framerate)
+
+        if not self.cap.isOpened():
+            print(f"[Camera] Could not open webcam at index {self.camera_index}")
+            self.opened = False
+            return
+
+        self.mode = "webcam"
+        self.opened = True
+        print(f"[Camera] Webcam started successfully at index {self.camera_index}")
+
+    def _read_webcam_frame(self):
+        if self.cap is None or not self.cap.isOpened():
+            return False, None
+
+        ret, frame = self.cap.read()
+
+        if not ret:
+            return False, None
+
+        frame = self._apply_rotation(frame)
+        return True, frame
+
+    # ------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------
+
+    def _apply_rotation(self, frame):
+        if self.rotation == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        if self.rotation == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+
+        if self.rotation == 270:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        return frame
+
+    def is_opened(self):
+        return self.opened
+
+    def read_frame(self):
+        if self.mode == "rpicam":
+            return self._read_rpicam_frame()
+
+        if self.mode == "webcam":
+            return self._read_webcam_frame()
 
         return False, None
 
@@ -195,4 +265,7 @@ class CameraCapture:
                 except Exception:
                     pass
 
-        print("Camera stream stopped")
+        if self.cap is not None:
+            self.cap.release()
+
+        print("[Camera] Camera stopped")
