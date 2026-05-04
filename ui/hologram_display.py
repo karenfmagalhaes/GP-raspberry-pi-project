@@ -23,13 +23,17 @@ class HologramDisplay:
     H = 420
 
     _GESTURE_LABELS = {
-        "open_palm": "OPEN PALM",
-        "fist": "FIST",
-        "three_fingers": "3 FINGERS",
-        "peace": "PEACE",
-        "thumbs_up": "THUMBS UP",
-        "thumbs_down": "THUMBS DN",
-        "wake": "WAKE",
+        "ok":                     "OK SIGN",
+        "open_palm":              "OPEN PALM",
+        "fist":                   "FIST",
+        "peace":                  "PEACE",
+        "one_finger":             "ONE FINGER",
+        "one_finger_swipe_right": "FINGER RIGHT",
+        "one_finger_swipe_left":  "FINGER LEFT",
+        "peace_move_up":          "PEACE UP",
+        "peace_move_down":        "PEACE DOWN",
+        "rock":                   "ROCK",
+        "hand":                   "HAND",
     }
 
     def __init__(self, fps=12, show_camera=True):
@@ -130,14 +134,13 @@ class HologramDisplay:
 
     def show_action_from_gesture(self, gesture):
         gesture_to_action = {
-            "open_palm": "play",
-            "fist": "pause",
-            "three_fingers": "next",
-            "peace": "previous",
-            "thumbs_up": "volume_up",
-            "thumbs_down": "volume_down",
-            "shaka": "guide",
-            "rock": "view",
+            "open_palm":              "play",
+            "fist":                   "pause",
+            "one_finger_swipe_right": "next",
+            "one_finger_swipe_left":  "previous",
+            "peace_move_up":          "volume_up",
+            "peace_move_down":        "volume_down",
+            "rock":                   "view",
         }
 
         action = gesture_to_action.get(gesture, "idle")
@@ -534,22 +537,24 @@ class HologramDisplay:
         self.screen.blit(title, title_rect)
 
         lines = [
-            ("ACTIVATE", "Hold one finger 1.5 sec"),
-            ("OPEN PALM", "Play"),
-            ("FIST", "Pause"),
-            ("THREE FINGERS", "Next track"),
-            ("PEACE SIGN", "Previous track"),
-            ("THUMB UP", "Volume up"),
-            ("THUMB DOWN", "Volume down"),
-            ("H VIEW ON", "Camera background visible"),
-            ("H VIEW OFF", "Background hidden, gestures active"),
+            ("ACTIVATE",       "OK sign  1.5 sec"),
+            ("OPEN PALM",      "Play"),
+            ("FIST",           "Pause"),
+            ("ONE FINGER →",   "Next track"),
+            ("ONE FINGER ←",   "Previous track"),
+            ("PEACE UP",       "Volume up"),
+            ("PEACE DOWN",     "Volume down"),
+            ("ROCK SIGN",      "Background ON/OFF"),
+            ("H",              "Toggle view manually"),
+            ("G",              "Show / hide guide"),
+            ("Q",              "Quit"),
         ]
 
         start_y = y + 60
 
         for i, (gesture_name, action) in enumerate(lines):
-            row_y = start_y + i * 21
-            colour = (255, 80, 220) if i in (1, 2, 3, 4, 5, 6) else (0, 220, 255)
+            row_y = start_y + i * 18   # tighter spacing to fit 11 lines
+            colour = (255, 80, 220) if 1 <= i <= 7 else (0, 220, 255)
 
             gesture_surface = self.font_help.render(gesture_name, True, colour)
             action_surface = self.font_help.render(action, True, (230, 240, 245))
@@ -558,10 +563,10 @@ class HologramDisplay:
             self.screen.blit(action_surface, (x + 190, row_y))
 
         tips = [
-            "Palm facing camera works best",
-            "Hand fully visible, 50-60 cm away",
-            "Detection: 0.3-0.5 sec",
-            "Hold gesture about 1 sec, wait 1 sec",
+            "Palm facing camera, hand fully visible",
+            "50-60 cm from camera works best",
+            "Hold still for play/pause (8 frames ~0.8 sec)",
+            "Keep index finger up while swiping for next/previous",
         ]
 
         tip_y = start_y + len(lines) * 21 + 10

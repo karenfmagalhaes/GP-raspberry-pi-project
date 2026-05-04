@@ -3,18 +3,30 @@ import math
 
 class GestureClassifier:
     """
-    Rule-based hand gesture classifier using MediaPipe hand landmarks.
+    Static gesture classifier for HoloBeat.
 
-    Gestures:
-    - wake = one finger up
-    - open_palm = play
-    - fist = pause
-    - three_fingers = next
-    - peace = previous
-    - thumbs_up / thumbs_down = volume
-    - shaka = open/close guide
-    - rock = camera view on/off
+    Returns one of: rock, ok, open_palm, peace, fist, one_finger, or None.
+
+    System gestures (not in gestures.json, handled in main.py):
+        rock       = index + pinky up, middle + ring down  (camera toggle, hold 0.8 s)
+        ok         = thumb tip near index tip, middle/ring/pinky up (activate, hold 1.5 s)
+
+    Spotify hold gestures (static shape held still):
+        open_palm  = all four fingers up, thumb not circling index  → play
+        fist       = all four fingers down                          → pause
+
+    Combination gestures (shape + movement via MotionGestureDetector):
+        one_finger = only index up  → swipe right/left (next / previous)
+        peace      = index + middle up, ring + pinky down
+                     → peace_move_up (volume up) / peace_move_down (volume down)
+
+    Detection order matters — rock is first because it shares index_up with
+    several other gestures. ok is checked before open_palm so thumb-index
+    proximity takes priority over a plain flat hand.
     """
+
+    # Thumb-tip to index-tip distance threshold, relative to palm size.
+    _OK_TOUCH_RATIO = 0.42
 
     def classify(self, hand_landmarks):
         lm = hand_landmarks.landmark
@@ -22,87 +34,47 @@ class GestureClassifier:
         def dist(a, b):
             return math.hypot(lm[a].x - lm[b].x, lm[a].y - lm[b].y)
 
-        # Main finger states.
-        index_up = lm[8].y < lm[6].y
+        palm_size = max(0.001, dist(0, 9))   # wrist (0) to middle-finger base (9)
+
+        index_up  = lm[8].y  < lm[6].y
         middle_up = lm[12].y < lm[10].y
-        ring_up = lm[16].y < lm[14].y
-        pinky_up = lm[20].y < lm[18].y
+        ring_up   = lm[16].y < lm[14].y
+        pinky_up  = lm[20].y < lm[18].y
 
-        index_down = not index_up
+        index_down  = not index_up
         middle_down = not middle_up
-        ring_down = not ring_up
-        pinky_down = not pinky_up
+        ring_down   = not ring_up
+        pinky_down  = not pinky_up
 
-        # Thumb landmarks.
-        thumb_tip = lm[4]
-        thumb_ip = lm[3]
-        thumb_mcp = lm[2]
-        wrist = lm[0]
+        # Thumb-index proximity for OK sign.
+        # The index is bent in a proper OK circle so index_up is unreliable.
+        thumb_index_touching = dist(4, 8) < palm_size * self._OK_TOUCH_RATIO
 
-        # Thumb extension checks.
-        thumb_sideways = abs(thumb_tip.x - thumb_mcp.x) > 0.055
-        thumb_long = dist(4, 2) > dist(3, 2) * 1.15
-        thumb_extended = thumb_sideways or thumb_long
-
-        # More relaxed pinky extension for shaka/rock.
-        pinky_long = dist(20, 17) > dist(18, 17) * 1.15
-        pinky_extended = pinky_up or pinky_long
-
-        # ------------------------------------------------------------
-        # Interface gestures first
-        # ------------------------------------------------------------
-
-        # 🤙 Shaka: thumb + pinky extended, index/middle/ring folded.
-        if thumb_extended and pinky_extended and index_down and middle_down and ring_down:
-            return None  # shaka disabled because it opens guide by accident
-
-        # 🤘 Rock: index + pinky extended, middle/ring folded.
-        if index_up and pinky_extended and middle_down and ring_down:
+        # Rock: index AND pinky raised, middle AND ring down.
+        # Checked first — shares index_up with several other gestures.
+        if index_up and pinky_up and middle_down and ring_down:
             return "rock"
 
-        # ------------------------------------------------------------
-        # Spotify gestures
-        # ------------------------------------------------------------
+        # OK sign: thumb touching index, other three fingers extended up.
+        # Checked before open_palm — in open_palm the thumb is free, not circling.
+        if thumb_index_touching and middle_up and ring_up and pinky_up:
+            return "ok"
 
-        # Open palm.
+        # Open palm: all four fingers up (thumb not constrained after ok check).
         if index_up and middle_up and ring_up and pinky_up:
             return "open_palm"
 
-        # Fist / thumbs.
-        # IMPORTANT:
-        # Pause was getting confused with volume, so thumbs_up/down must be
-        # very clear. Otherwise, a closed hand is treated as fist = pause.
-        if index_down and middle_down and ring_down and pinky_down:
-            clear_thumb_up = (
-                thumb_extended
-                and thumb_tip.y < wrist.y - 0.13
-                and thumb_tip.y < thumb_mcp.y - 0.08
-            )
-
-            clear_thumb_down = (
-                thumb_extended
-                and thumb_tip.y > wrist.y + 0.18
-                and thumb_tip.y > thumb_mcp.y + 0.08
-            )
-
-            if clear_thumb_up:
-                return "thumbs_up"
-
-            if clear_thumb_down:
-                return "thumbs_down"
-
-            return "fist"
-
-        # Three fingers = next.
-        if index_up and middle_up and ring_up and pinky_down:
-            return "three_fingers"
-
-        # Peace = previous.
+        # Peace: index + middle up, ring + pinky down.
         if index_up and middle_up and ring_down and pinky_down:
             return "peace"
 
-        # Wake = only index up.
+        # Fist: all four fingers down (thumb ignored).
+        if index_down and middle_down and ring_down and pinky_down:
+            return "fist"
+
+        # One finger: only index up, all others down.
+        # Used for directional swipes (next / previous track).
         if index_up and middle_down and ring_down and pinky_down:
-            return "wake"
+            return "one_finger"
 
         return None

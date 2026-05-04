@@ -5,96 +5,62 @@ from pathlib import Path
 import cv2
 
 from utils.hold_detector import HoldDetector
+from utils.gesture_stability import GestureStability
+from utils.cooldown import Cooldown
 from camera.capture import CameraCapture
 from vision.hand_tracker import HandTracker
 from vision.gesture_classifier import GestureClassifier
-from utils.cooldown import Cooldown
+from vision.motion_gesture_detector import MotionGestureDetector
 from spotify.controller import SpotifyController
-from utils.gesture_stability import GestureStability
 from ui.hologram_display import HologramDisplay
 
+# Set False on Raspberry Pi with real Spotify credentials.
+TEST_MODE = False
+
+VOLUME_STEP = 5   # percent per volume gesture (controller default is 10)
 
 _GESTURE_MESSAGES = {
-    "open_palm": "Playing.",
-    "fist": "Paused.",
-    "three_fingers": "Next track.",
-    "peace": "Previous track.",
-    "thumbs_up": "Volume up.",
-    "thumbs_down": "Volume down.",
+    "open_palm":              "Playing.",
+    "fist":                   "Paused.",
+    "one_finger_swipe_right": "Next track.",
+    "one_finger_swipe_left":  "Previous track.",
+    "peace_move_up":          "Volume up.",
+    "peace_move_down":        "Volume down.",
+    "rock":                   "Background view toggled.",
 }
 
 
 def _load_gesture_map():
     path = Path(__file__).resolve().parent / "config" / "gestures.json"
-
     with open(path, "r", encoding="utf-8") as file:
         return json.load(file)
 
 
 def _execute(mapped_action, spotify):
-    if mapped_action == "play":
-        return spotify.play()
-
-    if mapped_action == "pause":
-        return spotify.pause()
-
-    if mapped_action == "next_track":
-        return spotify.next_track()
-
-    if mapped_action == "previous_track":
-        return spotify.previous_track()
-
-    if mapped_action == "volume_up":
-        return spotify.volume_up()
-
-    if mapped_action == "volume_down":
-        return spotify.volume_down()
-
-    return "No action mapped"
-
-
-def _execute_ui_gesture(gesture, display):
-    """
-    Interface-only gestures.
-
-    Guide is now keyboard only:
-    G = open/close guide
-
-    Rock gesture still controls camera view:
-    rock = show/hide camera background
-    """
-    if gesture != "rock":
-        return None
-
-    latched = getattr(display, "_ui_gesture_latched", None)
-
-    if latched == gesture:
-        return None
-
-    display._ui_gesture_latched = gesture
-
-    display.show_camera = not display.show_camera
-    return "Camera view ON." if display.show_camera else "Camera view OFF."
+    if TEST_MODE:
+        return f"TEST MODE: {mapped_action}"
+    dispatch = {
+        "play":           spotify.play,
+        "pause":          spotify.pause,
+        "next_track":     spotify.next_track,
+        "previous_track": spotify.previous_track,
+        "volume_up":      lambda: spotify.volume_up(step=VOLUME_STEP),
+        "volume_down":    lambda: spotify.volume_down(step=VOLUME_STEP),
+    }
+    fn = dispatch.get(mapped_action)
+    return fn() if fn else "No action mapped"
 
 
 def _is_error(result):
     result = result.lower()
-
-    error_words = (
-        "error",
-        "no active",
-        "not allowed",
-        "restricted",
-        "does not support",
-        "could not",
+    return any(
+        w in result
+        for w in ("error", "no active", "not allowed", "restricted",
+                  "does not support", "could not")
     )
-
-    return any(word in result for word in error_words)
 
 
 def main():
-    # Camera is used for gesture input only.
-    # The hologram is now the interface, not the body skeleton.
     camera = CameraCapture(
         width=480,
         height=360,
@@ -103,44 +69,54 @@ def main():
         autofocus=True,
     )
 
-    tracker = HandTracker()
-    classifier = GestureClassifier()
-    cooldown = Cooldown(delay=1.0)
-    stability = GestureStability(required_frames=3)
-    spotify = SpotifyController()
-    gesture_map = _load_gesture_map()
+    tracker         = HandTracker()
+    classifier      = GestureClassifier()
+    motion_detector = MotionGestureDetector()
+    # GestureStability requires the same shape for 8 consecutive frames (~0.8 s
+    # at 10 fps) before a static hold gesture (open_palm / fist) can fire.
+    stability       = GestureStability(required_frames=8)
+    # Cooldown enforces a minimum gap between any two Spotify actions.
+    # ready() stamps the trigger time itself — do NOT call reset() after an
+    # action or the cooldown is immediately undone.
+    cooldown        = Cooldown(delay=1.5)
+    spotify         = None if TEST_MODE else SpotifyController()
+    gesture_map     = _load_gesture_map()
 
-    # Hologram interface window.
     display = HologramDisplay(fps=12, show_camera=True)
 
-    # Wake mode: user must hold one finger up first.
-    gesture_active = False
+    gesture_active   = False
     last_active_time = 0.0
-    active_timeout = 10.0
-    wake_detector = HoldDetector("wake", hold_seconds=1.5)
+    active_timeout   = 10.0
+    ok_detector      = HoldDetector("ok", hold_seconds=1.5)
+
+    # Rock hold + cooldown — enforced here, not in gesture_classifier.
+    rock_start         = None
+    rock_last_fired    = 0.0
+    rock_hold_seconds  = 0.8
+    rock_cooldown_secs = 2.0
+
+    # Release-to-trigger for open_palm / fist.
+    # Stores the last static gesture that fired; same shape is blocked until
+    # the user changes or removes their hand.
+    last_static_fired = None
 
     if not camera.is_opened():
         print("[HoloBeat] Could not open camera.")
         display.close()
         return
 
-    current_gesture = "No hand"
-    current_track = ""
-    last_track_time = 0.0
+    current_gesture   = "No hand"
+    executing_gesture = ""   # used for the action animation during executing state
+    current_track     = ""
+    last_track_time   = 0.0
 
-    # Interface states:
-    # standby | ready | executing | error
-    state = "standby"
-    message = "Hold one finger up to activate."
+    state        = "standby"
+    message      = "Show OK sign to activate gestures."
     action_until = 0.0
 
     print("HoloBeat — gesture-controlled Spotify hologram interface")
-    print("Q = quit")
-    print("H = toggle camera background")
-    print("G = gesture guide")
-    print("🤙 shaka gesture = open/close guide")
-    print("🤘 rock gesture = toggle camera background")
-    print("Hold one finger up for 1.5 seconds to activate gesture controls.")
+    print("Q = quit | H = toggle camera background | G = gesture guide")
+    print("Hold the OK sign for 1.5 seconds to activate gesture controls.")
 
     try:
         while True:
@@ -152,162 +128,246 @@ def main():
 
             now = time.time()
 
-            # Mirror image so gestures feel natural.
+            # Mirror so gestures feel natural.
             frame = cv2.flip(frame, 1)
 
-            # Hand tracking only. No body pose processing.
             hand_results = tracker.process(frame)
 
-            detected = None
+            detected_static = None
+            detected_motion = None
 
+            # ----------------------------------------------------------------
+            # Hand tracking
+            # ----------------------------------------------------------------
             if hand_results.multi_hand_landmarks:
                 for hand_landmarks in hand_results.multi_hand_landmarks:
-                    detected = classifier.classify(hand_landmarks)
+                    detected_static = classifier.classify(hand_landmarks)
+                    if gesture_active:
+                        # Motion detector requires the current shape to gate
+                        # which combination gesture it checks.
+                        detected_motion = motion_detector.update(
+                            hand_landmarks, detected_static
+                        )
 
-            # ------------------------------------------------------------
+                # Display: prefer a motion event name, else the static shape.
+                current_gesture = detected_static if detected_static else "hand"
+                if detected_motion:
+                    current_gesture = detected_motion
+
+                # Reset rock hold timer when the user is not showing rock.
+                if detected_static != "rock":
+                    rock_start = None
+
+            else:
+                # No hand in frame — reset all transient detectors.
+                current_gesture   = "No hand"
+                last_static_fired = None
+                ok_detector.reset()
+                motion_detector.reset()
+                stability.reset()
+                rock_start = None
+
+                if not gesture_active and state not in ("executing", "error", "ready"):
+                    state   = "standby"
+                    message = "Show OK sign to activate gestures."
+
+            # ----------------------------------------------------------------
             # Auto-lock after inactivity
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
             if gesture_active and now - last_active_time > active_timeout:
-                gesture_active = False
-                state = "standby"
-                message = "Gesture controls locked again."
-                action_until = 0.0
-                wake_detector.reset()
+                gesture_active    = False
+                state             = "standby"
+                message           = "Gesture controls locked again."
+                action_until      = 0.0
+                executing_gesture = ""
+                last_static_fired = None
+                ok_detector.reset()
+                motion_detector.reset()
                 stability.reset()
                 print("[HoloBeat] Standby — timeout")
 
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
             # Gesture processing
-            # ------------------------------------------------------------
-            if detected:
-                current_gesture = detected
-
-                # Reset UI gesture latch when the user changes gesture.
-                if detected not in ("shaka", "rock"):
-                    setattr(display, "_ui_gesture_latched", None)
+            # ----------------------------------------------------------------
+            if hand_results.multi_hand_landmarks:
 
                 if not gesture_active:
-                    if wake_detector.update(detected):
-                        gesture_active = True
-                        last_active_time = now
-                        state = "ready"
-                        message = "Gesture controls active."
-                        action_until = 0.0
-
-                        wake_detector.reset()
+                    # ---- Standby: only the OK sign activates controls ----
+                    if ok_detector.update(detected_static):
+                        gesture_active    = True
+                        last_active_time  = now
+                        state             = "ready"
+                        message           = "Gesture controls active."
+                        action_until      = 0.0
+                        executing_gesture = ""
+                        last_static_fired = None
+                        ok_detector.reset()
+                        cooldown.reset()   # allow first action immediately
+                        motion_detector.reset()
                         stability.reset()
-                        cooldown.reset()
-
                         print("[HoloBeat] Controls active")
 
                     elif state != "error":
                         state = "standby"
-
-                        if detected == "wake" and wake_detector.start_time is not None:
+                        if detected_static == "ok" and ok_detector.start_time is not None:
                             message = "Hold still..."
                         else:
-                            message = "Hold one finger up to activate."
+                            message = "Show OK sign to activate gestures."
 
                 else:
-                    if detected == "wake":
-                        # Keep controls alive.
-                        last_active_time = now
+                    # ---- Ready: process Spotify and system gestures ----
 
-                    else:
-                        stable = stability.update(detected)
+                    # Any visible hand keeps the active timer alive.
+                    last_active_time = now
 
-                        if stable and cooldown.ready():
-                            # UI gestures first:
-                            # shaka = guide, rock = camera view
-                            ui_result = _execute_ui_gesture(stable, display)
+                    # Any gesture change clears the release-to-trigger block.
+                    if detected_static != last_static_fired:
+                        last_static_fired = None
 
-                            if ui_result:
-                                state = "executing"
-                                message = ui_result
-                                action_until = now + 2.0
+                    # -- Priority 1: Rock (system gesture) --
+                    # Must be held for rock_hold_seconds.
+                    # A 2-second cooldown prevents accidental double-toggles.
+                    # rock_start resets to None after each fire, so the user
+                    # must fully re-show rock to toggle again.
+                    if detected_static == "rock":
+                        if rock_start is None:
+                            rock_start = now
 
-                                print(f"[HoloBeat] {stable} -> {ui_result}")
+                        rock_elapsed = now - rock_start
+                        rock_ready   = (
+                            rock_elapsed >= rock_hold_seconds
+                            and now - rock_last_fired >= rock_cooldown_secs
+                        )
 
-                                last_active_time = now
-                                stability.reset()
-                                cooldown.reset()
+                        if rock_ready:
+                            display.show_camera = not display.show_camera
+                            rock_last_fired     = now
+                            rock_start          = None   # must re-hold to fire again
+                            state             = "executing"
+                            message           = _GESTURE_MESSAGES["rock"]
+                            executing_gesture = "rock"
+                            action_until      = now + 2.0
+                            print(
+                                f"[HoloBeat] rock -> camera "
+                                f"{'ON' if display.show_camera else 'OFF'}"
+                            )
+                        elif state == "ready":
+                            message = "Hold rock gesture..."
 
-                            else:
+                    # -- Priority 2: Motion combination gesture --
+                    # one_finger+swipe or peace+move, gated by shape in detector.
+                    # Motion wins over a static hold — stability resets so a
+                    # hand returning to still after a swipe must re-build before
+                    # play can fire.
+                    elif detected_motion and cooldown.ready():
+                        mapped_action = gesture_map.get(detected_motion, "no_action")
+                        result        = _execute(mapped_action, spotify)
+
+                        if _is_error(result):
+                            state             = "error"
+                            message           = result
+                            executing_gesture = detected_motion
+                            action_until      = now + 4.0
+                        else:
+                            state             = "executing"
+                            message           = _GESTURE_MESSAGES.get(detected_motion, "Done.")
+                            executing_gesture = detected_motion
+                            action_until      = now + 3.0
+
+                        stability.reset()
+                        last_static_fired = None
+                        print(f"[HoloBeat] {detected_motion} -> {result}")
+                        # Do NOT call cooldown.reset() — ready() already stamped it.
+
+                    # -- Priority 3: Static hold gesture (open_palm / fist) --
+                    # Requires the same shape for 8 consecutive frames (~0.8 s).
+                    # Release-to-trigger: the same gesture cannot fire again until
+                    # the user changes hand shape or removes their hand.
+                    elif detected_static in ("open_palm", "fist"):
+                        if last_static_fired == detected_static:
+                            # Same gesture still held after firing — block re-trigger.
+                            stability.reset()
+                        else:
+                            stable = stability.update(detected_static)
+                            if stable and cooldown.ready():
                                 mapped_action = gesture_map.get(stable, "no_action")
-                                result = _execute(mapped_action, spotify)
+                                result        = _execute(mapped_action, spotify)
 
                                 if _is_error(result):
-                                    state = "error"
-                                    message = result
-                                    action_until = now + 4.0
-
+                                    state             = "error"
+                                    message           = result
+                                    executing_gesture = stable
+                                    action_until      = now + 4.0
                                 else:
-                                    state = "executing"
-                                    message = _GESTURE_MESSAGES.get(stable, "Done.")
-                                    action_until = now + 3.0
+                                    state             = "executing"
+                                    message           = _GESTURE_MESSAGES.get(stable, "Done.")
+                                    executing_gesture = stable
+                                    action_until      = now + 3.0
 
+                                last_static_fired = detected_static
+                                stability.reset()   # require re-hold for next action
                                 print(f"[HoloBeat] {stable} -> {result}")
 
-                                last_active_time = now
-                                stability.reset()
-                                cooldown.reset()
+                    else:
+                        # Peace alone, one_finger waiting, ok, unrecognised — reset
+                        # stability so static holds must start fresh.
+                        stability.reset()
+                        last_static_fired = None
 
-                                if mapped_action in ("next_track", "previous_track", "play"):
-                                    last_track_time = 0.0
-
-            else:
-                current_gesture = "No hand"
-                setattr(display, "_ui_gesture_latched", None)
-                stability.reset()
-                wake_detector.reset()
-
-                if not gesture_active and state not in ("executing", "error", "ready"):
-                    state = "standby"
-                    message = "Hold one finger up to activate."
-
-            # ------------------------------------------------------------
-            # Return from executing/error state
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
+            # Return from executing / error state
+            # ----------------------------------------------------------------
             if state in ("executing", "error") and now > action_until:
+                executing_gesture = ""
                 if gesture_active:
-                    state = "ready"
+                    state   = "ready"
                     message = "Gesture controls active."
                 else:
-                    state = "standby"
-                    message = "Hold one finger up to activate."
+                    state   = "standby"
+                    message = "Show OK sign to activate gestures."
 
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
             # Refresh current Spotify track every 5 seconds
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
             if now - last_track_time >= 5.0:
-                current_track = spotify.get_current_track()
+                current_track   = spotify.get_current_track() if spotify else ""
                 last_track_time = now
 
-            # Wake progress for the ring animation.
+            # ----------------------------------------------------------------
+            # OK-hold progress for the ring animation
+            # ----------------------------------------------------------------
             wake_progress = 0.0
-
-            if wake_detector.start_time is not None and not gesture_active:
+            if ok_detector.start_time is not None and not gesture_active:
                 wake_progress = min(
                     1.0,
-                    (now - wake_detector.start_time) / wake_detector.hold_seconds,
+                    (now - ok_detector.start_time) / ok_detector.hold_seconds,
                 )
 
-            # ------------------------------------------------------------
-            # Render hologram interface
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
+            # Render
+            # Pass executing_gesture during executing/error so the centre orb
+            # shows the correct label for the full window (motion gestures are
+            # one-frame events; executing_gesture persists until action_until).
+            # ----------------------------------------------------------------
+            display_gesture = (
+                executing_gesture
+                if (state in ("executing", "error") and executing_gesture)
+                else current_gesture
+            )
+
             display.draw(
                 frame,
                 state,
                 message,
-                gesture=current_gesture,
+                gesture=display_gesture,
                 track=current_track,
                 camera_on=display.show_camera,
                 wake_progress=wake_progress,
             )
 
-            # ------------------------------------------------------------
-            # Keyboard input from pygame window
-            # ------------------------------------------------------------
+            # ----------------------------------------------------------------
+            # Keyboard input
+            # ----------------------------------------------------------------
             command = display.poll()
 
             if command == "quit":
