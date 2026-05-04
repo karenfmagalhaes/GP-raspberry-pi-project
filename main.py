@@ -100,8 +100,13 @@ def main():
     # the user changes or removes their hand.
     last_static_fired = None
 
+    # Volume mode — peace zone baseline approach.
+    test_volume          = 50    # TEST_MODE simulated volume (0–100 %)
+    volume_display       = ""    # "Volume: XX%" shown in the track area
+    volume_display_until = 0.0
+
     if not camera.is_opened():
-        print("[HoloBeat] Could not open camera.")
+        print("[WaveBeat] Could not open camera.")
         display.close()
         return
 
@@ -114,7 +119,7 @@ def main():
     message      = "Show OK sign to activate gestures."
     action_until = 0.0
 
-    print("HoloBeat — gesture-controlled Spotify hologram interface")
+    print("WaveBeat — gesture-controlled Spotify hologram interface")
     print("Q = quit | H = toggle camera background | G = gesture guide")
     print("Hold the OK sign for 1.5 seconds to activate gesture controls.")
 
@@ -123,7 +128,7 @@ def main():
             ret, frame = camera.read_frame()
 
             if not ret:
-                print("[HoloBeat] Camera read failed.")
+                print("[WaveBeat] Camera read failed.")
                 break
 
             now = time.time()
@@ -184,7 +189,7 @@ def main():
                 ok_detector.reset()
                 motion_detector.reset()
                 stability.reset()
-                print("[HoloBeat] Standby — timeout")
+                print("[WaveBeat] Standby — timeout")
 
             # ----------------------------------------------------------------
             # Gesture processing
@@ -205,7 +210,7 @@ def main():
                         cooldown.reset()   # allow first action immediately
                         motion_detector.reset()
                         stability.reset()
-                        print("[HoloBeat] Controls active")
+                        print("[WaveBeat] Controls active")
 
                     elif state != "error":
                         state = "standby"
@@ -248,14 +253,44 @@ def main():
                             executing_gesture = "rock"
                             action_until      = now + 2.0
                             print(
-                                f"[HoloBeat] rock -> camera "
+                                f"[WaveBeat] rock -> camera "
                                 f"{'ON' if display.show_camera else 'OFF'}"
                             )
                         elif state == "ready":
                             message = "Hold rock gesture..."
 
-                    # -- Priority 2: Motion combination gesture --
-                    # one_finger+swipe or peace+move, gated by shape in detector.
+                    # -- Priority 2a: Volume (peace zone) --
+                    # The detector manages baseline + repeat timing internally so
+                    # volume bypasses the main cooldown and can fire every second.
+                    elif detected_motion in ("peace_move_up", "peace_move_down"):
+                        is_up = detected_motion == "peace_move_up"
+                        if TEST_MODE:
+                            if is_up:
+                                test_volume = min(100, test_volume + VOLUME_STEP)
+                            else:
+                                test_volume = max(0, test_volume - VOLUME_STEP)
+                            result = f"Volume: {test_volume}%"
+                        else:
+                            result = (spotify.volume_up(step=VOLUME_STEP) if is_up
+                                      else spotify.volume_down(step=VOLUME_STEP))
+
+                        if _is_error(result):
+                            state             = "error"
+                            message           = result
+                            executing_gesture = detected_motion
+                            action_until      = now + 4.0
+                        else:
+                            state                = "executing"
+                            message              = result   # "Volume: 45%"
+                            executing_gesture    = detected_motion
+                            action_until         = now + 2.5
+                            volume_display       = result
+                            volume_display_until = now + 2.5
+
+                        stability.reset()
+                        print(f"[WaveBeat] {detected_motion} -> {result}")
+
+                    # -- Priority 2b: Swipe (one_finger) — main cooldown applies --
                     # Motion wins over a static hold — stability resets so a
                     # hand returning to still after a swipe must re-build before
                     # play can fire.
@@ -276,7 +311,7 @@ def main():
 
                         stability.reset()
                         last_static_fired = None
-                        print(f"[HoloBeat] {detected_motion} -> {result}")
+                        print(f"[WaveBeat] {detected_motion} -> {result}")
                         # Do NOT call cooldown.reset() — ready() already stamped it.
 
                     # -- Priority 3: Static hold gesture (open_palm / fist) --
@@ -306,7 +341,7 @@ def main():
 
                                 last_static_fired = detected_static
                                 stability.reset()   # require re-hold for next action
-                                print(f"[HoloBeat] {stable} -> {result}")
+                                print(f"[WaveBeat] {stable} -> {result}")
 
                     else:
                         # Peace alone, one_finger waiting, ok, unrecognised — reset
@@ -355,12 +390,13 @@ def main():
                 else current_gesture
             )
 
+            track_display = volume_display if now < volume_display_until else current_track
             display.draw(
                 frame,
                 state,
                 message,
                 gesture=display_gesture,
-                track=current_track,
+                track=track_display,
                 camera_on=display.show_camera,
                 wake_progress=wake_progress,
             )
@@ -376,7 +412,7 @@ def main():
             if command == "toggle_body":
                 display.show_camera = not display.show_camera
                 print(
-                    f"[HoloBeat] Camera background "
+                    f"[WaveBeat] Camera background "
                     f"{'ON' if display.show_camera else 'OFF'}"
                 )
 
@@ -384,7 +420,7 @@ def main():
         camera.release()
         tracker.close()
         display.close()
-        print("[HoloBeat] Closed.")
+        print("[WaveBeat] Closed.")
 
 
 if __name__ == "__main__":
