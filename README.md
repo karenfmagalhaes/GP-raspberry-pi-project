@@ -27,7 +27,7 @@ A group project focused on researching and developing a new IoT platform using R
 
 - Sergio Alves da Silva
 
-- Karen F. Magalhaes
+- Karen Ferreira Magalhaes
 
 ## Project Status
 
