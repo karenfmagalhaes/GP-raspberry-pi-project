@@ -1,4 +1,4 @@
-# WaveBeat - Gesture-Controlled Spotify Assistant
+# WaveBeat - Gesture-Controlled Spotify Controller
 
 WaveBeat is a Raspberry Pi project that allows a user to control Spotify playback using hand gestures. The project uses a Raspberry Pi camera to detect the user's hand, recognises static and movement-based gestures, and sends the matching command to Spotify. It also includes a hologram-style visual interface that shows the current state, detected gesture, action feedback and current track information.
 
@@ -6,8 +6,8 @@ WaveBeat is a Raspberry Pi project that allows a user to control Spotify playbac
 
 | Field         | Details                                        |
 | ------------- | ---------------------------------------------- |
-| Project Title | WaveBeat: Gesture-Controlled Spotify Assistant |
-| Supervisor    | `[add supervisor name]`                        |
+| Project Title | WaveBeat: Gesture-Controlled Spotify Controller |
+| Supervisor    | Muhammad Azeem                                  |
 
 ## Team Members
 
@@ -74,6 +74,7 @@ project-root/
 │   └── capture.py
 │
 ├── spotify/
+│   ├── auth.py
 │   └── controller.py
 │
 ├── ui/
