@@ -99,7 +99,7 @@ class MotionGestureDetector:
     # ------------------------------------------------------------------
 
     def _check_volume_zone(self, cy, now):
-           # Accumulate frames until baseline is stable enough to lock.
+        # Accumulate frames until baseline is stable enough to lock.
         if self._peace_baseline_y is None:
             self._peace_baseline_frames += 1
             if self._peace_baseline_frames >= self._BASELINE_FRAMES:
