@@ -1,8 +1,8 @@
 {
-  "open_palm": "play",
-  "fist": "pause",
-  "three_fingers": "next_track",
-  "peace": "previous_track",
-  "volume_up": "volume_up",
-  "volume_down": "volume_down"
+  "open_palm":              "play",
+  "fist":                   "pause",
+  "one_finger_swipe_right": "next_track",
+  "one_finger_swipe_left":  "previous_track",
+  "peace_move_up":          "volume_up",
+  "peace_move_down":        "volume_down"
 }

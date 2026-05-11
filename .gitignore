@@ -32,3 +32,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+.ven/
+.venv/
+.venv#/
+__pycache__/
+*.pyc
+
+.env
+.spotify_cache
+spotify_token.json

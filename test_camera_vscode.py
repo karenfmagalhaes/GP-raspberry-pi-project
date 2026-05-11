@@ -1,6 +1,3 @@
-# main.py
-# Runs the WaveBeat gesture-controlled Spotify interface.
-
 import json
 import time
 from pathlib import Path
@@ -10,7 +7,6 @@ import cv2
 from utils.hold_detector import HoldDetector
 from utils.gesture_stability import GestureStability
 from utils.cooldown import Cooldown
-from camera.capture import CameraCapture
 from vision.hand_tracker import HandTracker
 from vision.gesture_classifier import GestureClassifier
 from vision.motion_gesture_detector import MotionGestureDetector
@@ -19,6 +15,29 @@ from ui.hologram_display import HologramDisplay
 
 
 VOLUME_STEP = 5   # percent per volume gesture
+
+
+class WebCamCapture:
+    """
+    VS Code webcam replacement for Raspberry Pi CameraCapture.
+    This is the ONLY camera change for testing on laptop/PC.
+    """
+
+    def __init__(self, width=480, height=360, framerate=10, camera_index=0):
+        self.cap = cv2.VideoCapture(camera_index)
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.cap.set(cv2.CAP_PROP_FPS, framerate)
+
+    def is_opened(self):
+        return self.cap.isOpened()
+
+    def read_frame(self):
+        return self.cap.read()
+
+    def release(self):
+        self.cap.release()
 
 
 _GESTURE_MESSAGES = {
@@ -68,14 +87,13 @@ def _is_error(result):
 
 def main():
     # ------------------------------------------------------------
-    # Raspberry Pi camera setup
+    # ONLY CAMERA CHANGE FOR VS CODE
     # ------------------------------------------------------------
-    camera = CameraCapture(
+    camera = WebCamCapture(
         width=480,
         height=360,
         framerate=10,
-        rotation=0,
-        autofocus=True,
+        camera_index=0,
     )
 
     # ------------------------------------------------------------
@@ -85,11 +103,7 @@ def main():
     classifier = GestureClassifier()
     motion_detector = MotionGestureDetector()
 
-    # Same shape for 8 consecutive frames.
-    # At 10 FPS this is around 0.8 seconds.
     stability = GestureStability(required_frames=8)
-
-    # Cooldown between Spotify actions.
     cooldown = Cooldown(delay=1.5)
 
     # ------------------------------------------------------------
@@ -99,10 +113,8 @@ def main():
     gesture_map = _load_gesture_map()
 
     # ------------------------------------------------------------
-    # WaveBeat interface
+    # Original WaveBeat interface
     # ------------------------------------------------------------
-    # show_camera=False gives a darker interface for the hologram reflection.
-    # Press H or use rock gesture to toggle the camera background.
     display = HologramDisplay(
         fps=12,
         show_camera=False,
@@ -115,21 +127,19 @@ def main():
 
     ok_detector = HoldDetector("ok", hold_seconds=1.5)
 
-    # Rock hold + cooldown.
     rock_start = None
     rock_last_fired = 0.0
     rock_hold_seconds = 0.8
     rock_cooldown_secs = 2.0
 
-    # Release-to-trigger for open_palm / fist.
     last_static_fired = None
 
-    # Volume message shown temporarily in track panel.
     volume_display = ""
     volume_display_until = 0.0
 
     if not camera.is_opened():
-        print("[WaveBeat] Could not open camera.")
+        print("[WaveBeat] Could not open webcam.")
+        print("[WaveBeat] Try changing camera_index=0 to camera_index=1.")
         display.close()
         return
 
@@ -142,7 +152,7 @@ def main():
     message = "Show OK sign to activate gestures."
     action_until = 0.0
 
-    print("WaveBeat — gesture-controlled Spotify hologram interface")
+    print("WaveBeat — VS Code real test with webcam")
     print("Q = quit | H = toggle camera background | G = gesture guide")
     print("Hold the OK sign for 1.5 seconds to activate gesture controls.")
 
@@ -219,7 +229,6 @@ def main():
             # ------------------------------------------------------------
             if hand_results.multi_hand_landmarks:
                 if not gesture_active:
-                    # Standby: only OK sign activates controls.
                     if ok_detector.update(detected_static):
                         gesture_active = True
                         last_active_time = now
@@ -245,7 +254,6 @@ def main():
                             message = "Show OK sign to activate gestures."
 
                 else:
-                    # Ready: process Spotify and system gestures.
                     last_active_time = now
 
                     if detected_static != last_static_fired:
@@ -395,7 +403,7 @@ def main():
                 last_track_time = now
 
             # ------------------------------------------------------------
-            # OK hold progress for ring animation
+            # OK hold progress
             # ------------------------------------------------------------
             wake_progress = 0.0
 
@@ -406,7 +414,7 @@ def main():
                 )
 
             # ------------------------------------------------------------
-            # Render original WaveBeat interface as hologram-style UI
+            # Render original WaveBeat interface
             # ------------------------------------------------------------
             display_gesture = (
                 executing_gesture
@@ -430,9 +438,6 @@ def main():
                 wake_progress=wake_progress,
             )
 
-            # ------------------------------------------------------------
-            # Keyboard input
-            # ------------------------------------------------------------
             command = display.poll()
 
             if command == "quit":

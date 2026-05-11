@@ -1,5 +1,5 @@
 # vision/hand_tracker.py
-# Detects one hand using MediaPipe Hands and draws hand landmarks.
+# Detects one hand using MediaPipe Hands.
 
 import cv2
 import mediapipe as mp
@@ -20,8 +20,7 @@ class HandTracker:
         )
 
     def process(self, frame):
-        # Camera frames are BGR because camera/capture.py uses BGR888.
-        # MediaPipe needs RGB, so we convert here.
+        # Camera outputs BGR; MediaPipe requires RGB.
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Improves performance because MediaPipe does not need to modify the image.
@@ -30,13 +29,6 @@ class HandTracker:
         rgb_frame.flags.writeable = True
 
         return results
-
-    def draw_landmarks(self, frame, hand_landmarks):
-        self.mp_draw.draw_landmarks(
-            frame,
-            hand_landmarks,
-            self.mp_hands.HAND_CONNECTIONS
-        )
 
     def close(self):
         self.hands.close()
