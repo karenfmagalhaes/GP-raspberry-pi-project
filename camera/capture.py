@@ -1,6 +1,5 @@
 # camera/capture.py
-# Camera capture using rpicam-vid MJPEG stream.
-# This avoids Picamera2 Python binding problems in custom Python/pyenv environments.
+# Camera capture via rpicam-vid MJPEG stream (avoids Picamera2 pyenv issues).
 
 import os
 import select

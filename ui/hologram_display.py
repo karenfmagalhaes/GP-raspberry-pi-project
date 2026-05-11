@@ -1,11 +1,5 @@
-"""
-ui/hologram_display.py
-Pygame hologram-style display for WaveBeat.
-
-WaveBeat is the visual interface for the Raspberry Pi Spotify gesture controller.
-The layout scales from the current screen size so it works on laptop testing
-and Raspberry Pi fullscreen mode.
-"""
+# ui/hologram_display.py
+# Pygame fullscreen hologram display for WaveBeat; layout scales to any screen size.
 
 import math
 import time

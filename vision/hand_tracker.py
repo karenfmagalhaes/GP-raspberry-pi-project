@@ -20,8 +20,7 @@ class HandTracker:
         )
 
     def process(self, frame):
-        # Camera frames are BGR because camera/capture.py uses BGR888.
-        # MediaPipe needs RGB, so we convert here.
+        # Camera outputs BGR; MediaPipe requires RGB.
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Improves performance because MediaPipe does not need to modify the image.
