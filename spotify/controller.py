@@ -151,24 +151,6 @@ class SpotifyController:
         except Exception as e:
             return f"Spotify error: {e}"
 
-    def play_pause(self):
-        try:
-            playback = self.sp.current_playback()
-            device = self._get_device()
-            block = self._device_block_message(device)
-            if block:
-                return block
-            if playback and playback.get("is_playing"):
-                self.sp.pause_playback(device_id=device["id"])
-                return "Paused"
-            self.sp.start_playback(device_id=device["id"])
-            return "Playing"
-        except spotipy.SpotifyException:
-            self._device = None
-            return "Spotify error: device unavailable"
-        except Exception as e:
-            return f"Spotify error: {e}"
-
     def get_current_track(self):
         try:
             playback = self.sp.current_playback()
