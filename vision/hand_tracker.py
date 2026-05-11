@@ -1,5 +1,5 @@
 # vision/hand_tracker.py
-# Detects one hand using MediaPipe Hands and draws hand landmarks.
+# Detects one hand using MediaPipe Hands.
 
 import cv2
 import mediapipe as mp
@@ -30,13 +30,6 @@ class HandTracker:
         rgb_frame.flags.writeable = True
 
         return results
-
-    def draw_landmarks(self, frame, hand_landmarks):
-        self.mp_draw.draw_landmarks(
-            frame,
-            hand_landmarks,
-            self.mp_hands.HAND_CONNECTIONS
-        )
 
     def close(self):
         self.hands.close()

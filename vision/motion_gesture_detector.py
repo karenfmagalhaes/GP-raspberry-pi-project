@@ -1,25 +1,11 @@
+# vision/motion_gesture_detector.py
+# Detects movement-based gestures after a hand shape is recognised.
+
 import time
 import collections
 
 
 class MotionGestureDetector:
-    """
-    Detects hand-shape + movement combination gestures.
-
-    Combinations detected:
-        one_finger + swipe right  → one_finger_swipe_right  (next track)
-        one_finger + swipe left   → one_finger_swipe_left   (previous track)
-        peace      + hand above baseline  → peace_move_up   (volume up)
-        peace      + hand below baseline  → peace_move_down (volume down)
-
-    Volume uses a baseline-comparison approach:
-      - When peace first stabilises, the current palm Y is saved as the neutral
-        baseline.
-      - Moving above/below the baseline by more than DEAD_ZONE triggers volume.
-      - Held in the zone → repeats every REPEAT_INTERVAL seconds.
-      - History is cleared (baseline reset) whenever the shape changes.
-    """
-
     _HISTORY_SIZE = 10
 
     # --- Swipe detection (one_finger) ---
@@ -96,8 +82,6 @@ class MotionGestureDetector:
         dx  = pts[-1][0] - pts[0][0]   # positive = rightward
         dy  = pts[-1][1] - pts[0][1]
 
-        print(f"[Swipe debug] shape={hand_shape}, dx={dx:.3f}, dy={dy:.3f}")
-
         if abs(dx) > self._SWIPE_H_THRESHOLD and abs(dx) > abs(dy) * self._SWIPE_DOMINANT_RATIO:
             if dx > 0:
                 if self._trigger("one_finger_swipe_right", now, self._SWIPE_COOLDOWN):
@@ -115,32 +99,15 @@ class MotionGestureDetector:
     # ------------------------------------------------------------------
 
     def _check_volume_zone(self, cy, now):
-        """
-        Compare current palm Y to the saved neutral baseline.
-
-        Image-coordinate convention: smaller y = higher on screen.
-            cy < baseline - DEAD_ZONE  →  up zone   → peace_move_up
-            cy > baseline + DEAD_ZONE  →  down zone  → peace_move_down
-            otherwise                  →  dead zone  → None
-
-        Fires immediately on first entry into a zone; repeats every
-        REPEAT_INTERVAL seconds while the hand stays there.
-        """
-        # Accumulate frames until baseline is stable enough to lock.
+           # Accumulate frames until baseline is stable enough to lock.
         if self._peace_baseline_y is None:
             self._peace_baseline_frames += 1
             if self._peace_baseline_frames >= self._BASELINE_FRAMES:
                 self._peace_baseline_y = cy
-                print(f"[Volume debug] Baseline locked at y={cy:.3f}")
             return None
 
         up_threshold   = self._peace_baseline_y - self._DEAD_ZONE
         down_threshold = self._peace_baseline_y + self._DEAD_ZONE
-
-        print(
-            f"[Volume debug] cy={cy:.3f}  baseline={self._peace_baseline_y:.3f}"
-            f"  up<{up_threshold:.3f}  down>{down_threshold:.3f}"
-        )
 
         elapsed = now - self._peace_last_fired
 

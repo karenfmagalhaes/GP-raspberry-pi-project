@@ -1,31 +1,10 @@
+# vision/gesture_classifier.py
+# Classifies static hand shapes used by the WaveBeat gesture controller.
+
 import math
 
-
 class GestureClassifier:
-    """
-    Static gesture classifier for WaveBeat.
-
-    Returns one of: rock, ok, open_palm, peace, fist, one_finger, or None.
-
-    System gestures (not in gestures.json, handled in main.py):
-        rock       = index + pinky up, middle + ring down  (camera toggle, hold 0.8 s)
-        ok         = thumb tip near index tip, middle/ring/pinky up (activate, hold 1.5 s)
-
-    Spotify hold gestures (static shape held still):
-        open_palm  = all four fingers up, thumb not circling index  → play
-        fist       = all four fingers down                          → pause
-
-    Combination gestures (shape + movement via MotionGestureDetector):
-        one_finger = only index up  → swipe right/left (next / previous)
-        peace      = index + middle up, ring + pinky down
-                     → peace_move_up (volume up) / peace_move_down (volume down)
-
-    Detection order matters — rock is first because it shares index_up with
-    several other gestures. ok is checked before open_palm so thumb-index
-    proximity takes priority over a plain flat hand.
-    """
-
-    # Thumb-tip to index-tip distance threshold, relative to palm size.
+    # Distance limit for detecting the OK sign.
     _OK_TOUCH_RATIO = 0.42
 
     def classify(self, hand_landmarks):

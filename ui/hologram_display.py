@@ -86,7 +86,6 @@ class HologramDisplay:
         self.action_duration = 1.5
 
         self.show_help = False
-        self.guide_until = 0.0
 
         # ------------------------------------------------------------
         # Fonts
@@ -241,7 +240,7 @@ class HologramDisplay:
         self.draw_gesture_panel(gesture, view_on)
         self.draw_shortcuts()
 
-        if self.show_help or time.time() < self.guide_until:
+        if self.show_help:
             self.draw_help_menu()
 
         pygame.display.flip()
@@ -595,8 +594,7 @@ class HologramDisplay:
     # ------------------------------------------------------------------
 
     def draw_shortcuts(self):
-        # Do not show shortcut text behind the guide.
-        if self.show_help or time.time() < self.guide_until:
+        if self.show_help:
             return
 
         text = "G Guide   H View   Q Quit"
