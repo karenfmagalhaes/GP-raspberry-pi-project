@@ -1,11 +1,15 @@
-# Python
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.venv/
+
+# Python virtual environments
 venv/
+.venv/
 env/
+.ven/
+.venv#/
 
 # Environment variables and secrets
 .env
@@ -32,13 +36,3 @@ Thumbs.db
 
 # Logs
 *.log
-
-.ven/
-.venv/
-.venv#/
-__pycache__/
-*.pyc
-
-.env
-.spotify_cache
-spotify_token.json
