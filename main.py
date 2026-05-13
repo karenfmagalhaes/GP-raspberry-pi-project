@@ -18,7 +18,7 @@ from spotify.controller import SpotifyController
 from ui.hologram_display import HologramDisplay
 
 
-VOLUME_STEP = 5   # percent per volume gesture
+VOLUME_STEP = 5
 
 
 _GESTURE_MESSAGES = {
@@ -26,7 +26,6 @@ _GESTURE_MESSAGES = {
     "fist": "Paused.",
     "one_finger_swipe_right": "Next track.",
     "one_finger_swipe_left": "Previous track.",
-    "rock": "Background view toggled.",
 }
 
 
@@ -67,9 +66,6 @@ def _is_error(result):
 
 
 def main():
-    # ------------------------------------------------------------
-    # Raspberry Pi camera setup
-    # ------------------------------------------------------------
     camera = CameraCapture(
         width=480,
         height=360,
@@ -78,35 +74,23 @@ def main():
         autofocus=True,
     )
 
-    # ------------------------------------------------------------
-    # Vision / gesture setup
-    # ------------------------------------------------------------
     tracker = HandTracker()
     classifier = GestureClassifier()
     motion_detector = MotionGestureDetector()
 
-    # Same shape for 8 consecutive frames.
-    # At 10 FPS this is around 0.8 seconds.
     stability = GestureStability(required_frames=8)
-
-    # Cooldown between Spotify actions.
     cooldown = Cooldown(delay=1.5)
 
-    # ------------------------------------------------------------
-    # Real Spotify controller
-    # ------------------------------------------------------------
     spotify = SpotifyController()
     gesture_map = _load_gesture_map()
 
-    # ------------------------------------------------------------
-    # WaveBeat interface
-    # ------------------------------------------------------------
-    # show_camera=False gives a darker interface for the hologram reflection.
-    # Press H or use rock gesture to toggle the camera background.
+    # Final hologram display.
+    # Camera still detects gestures, but it is NOT shown as background.
     display = HologramDisplay(
         fps=12,
         show_camera=False,
         fullscreen=True,
+        mirror_output=True,
     )
 
     gesture_active = False
@@ -115,16 +99,8 @@ def main():
 
     ok_detector = HoldDetector("ok", hold_seconds=1.5)
 
-    # Rock hold + cooldown.
-    rock_start = None
-    rock_last_fired = 0.0
-    rock_hold_seconds = 0.8
-    rock_cooldown_secs = 2.0
-
-    # Release-to-trigger for open_palm / fist.
     last_static_fired = None
 
-    # Volume message shown temporarily in track panel.
     volume_display = ""
     volume_display_until = 0.0
 
@@ -143,7 +119,7 @@ def main():
     action_until = 0.0
 
     print("WaveBeat — gesture-controlled Spotify hologram interface")
-    print("Q = quit | H = toggle camera background | G = gesture guide")
+    print("Q/ESC = quit | G = guide | M = mirror mode")
     print("Hold the OK sign for 1.5 seconds to activate gesture controls.")
 
     try:
@@ -156,7 +132,7 @@ def main():
 
             now = time.time()
 
-            # Mirror so gestures feel natural.
+            # Mirror camera frame so gestures feel natural.
             frame = cv2.flip(frame, 1)
 
             hand_results = tracker.process(frame)
@@ -164,9 +140,6 @@ def main():
             detected_static = None
             detected_motion = None
 
-            # ------------------------------------------------------------
-            # Hand tracking
-            # ------------------------------------------------------------
             if hand_results.multi_hand_landmarks:
                 for hand_landmarks in hand_results.multi_hand_landmarks:
                     detected_static = classifier.classify(hand_landmarks)
@@ -182,24 +155,17 @@ def main():
                 if detected_motion:
                     current_gesture = detected_motion
 
-                if detected_static != "rock":
-                    rock_start = None
-
             else:
                 current_gesture = "No hand"
                 last_static_fired = None
                 ok_detector.reset()
                 motion_detector.reset()
                 stability.reset()
-                rock_start = None
 
                 if not gesture_active and state not in ("executing", "error", "ready"):
                     state = "standby"
                     message = "Show OK sign to activate gestures."
 
-            # ------------------------------------------------------------
-            # Auto-lock after inactivity
-            # ------------------------------------------------------------
             if gesture_active and now - last_active_time > active_timeout:
                 gesture_active = False
                 state = "standby"
@@ -214,12 +180,8 @@ def main():
 
                 print("[WaveBeat] Standby — timeout")
 
-            # ------------------------------------------------------------
-            # Gesture processing
-            # ------------------------------------------------------------
             if hand_results.multi_hand_landmarks:
                 if not gesture_active:
-                    # Standby: only OK sign activates controls.
                     if ok_detector.update(detected_static):
                         gesture_active = True
                         last_active_time = now
@@ -245,48 +207,13 @@ def main():
                             message = "Show OK sign to activate gestures."
 
                 else:
-                    # Ready: process Spotify and system gestures.
                     last_active_time = now
 
                     if detected_static != last_static_fired:
                         last_static_fired = None
 
-                    # ----------------------------------------------------
-                    # Priority 1: Rock gesture
-                    # ----------------------------------------------------
-                    if detected_static == "rock":
-                        if rock_start is None:
-                            rock_start = now
-
-                        rock_elapsed = now - rock_start
-
-                        rock_ready = (
-                            rock_elapsed >= rock_hold_seconds
-                            and now - rock_last_fired >= rock_cooldown_secs
-                        )
-
-                        if rock_ready:
-                            display.show_camera = not display.show_camera
-                            rock_last_fired = now
-                            rock_start = None
-
-                            state = "executing"
-                            message = _GESTURE_MESSAGES["rock"]
-                            executing_gesture = "rock"
-                            action_until = now + 2.0
-
-                            print(
-                                f"[WaveBeat] rock -> camera "
-                                f"{'ON' if display.show_camera else 'OFF'}"
-                            )
-
-                        elif state == "ready":
-                            message = "Hold rock gesture..."
-
-                    # ----------------------------------------------------
-                    # Priority 2a: Volume gesture
-                    # ----------------------------------------------------
-                    elif detected_motion in ("peace_move_up", "peace_move_down"):
+                    # Priority 1: Volume gesture
+                    if detected_motion in ("peace_move_up", "peace_move_down"):
                         is_up = detected_motion == "peace_move_up"
 
                         result = (
@@ -307,6 +234,7 @@ def main():
                             executing_gesture = detected_motion
                             action_until = now + 2.5
 
+                            # This appears ONLY under the big VOL+/VOL- action.
                             volume_display = result
                             volume_display_until = now + 2.5
 
@@ -314,9 +242,7 @@ def main():
 
                         print(f"[WaveBeat] {detected_motion} -> {result}")
 
-                    # ----------------------------------------------------
-                    # Priority 2b: Swipe gesture
-                    # ----------------------------------------------------
+                    # Priority 2: Swipe gesture
                     elif detected_motion and cooldown.ready():
                         mapped_action = gesture_map.get(detected_motion, "no_action")
                         result = _execute(mapped_action, spotify)
@@ -338,10 +264,7 @@ def main():
 
                         print(f"[WaveBeat] {detected_motion} -> {result}")
 
-                    # ----------------------------------------------------
-                    # Priority 3: Static hold gesture
-                    # open_palm / fist
-                    # ----------------------------------------------------
+                    # Priority 3: Static hold gesture open_palm / fist
                     elif detected_static in ("open_palm", "fist"):
                         if last_static_fired == detected_static:
                             stability.reset()
@@ -374,9 +297,6 @@ def main():
                         stability.reset()
                         last_static_fired = None
 
-            # ------------------------------------------------------------
-            # Return from executing / error state
-            # ------------------------------------------------------------
             if state in ("executing", "error") and now > action_until:
                 executing_gesture = ""
 
@@ -387,16 +307,10 @@ def main():
                     state = "standby"
                     message = "Show OK sign to activate gestures."
 
-            # ------------------------------------------------------------
-            # Refresh current Spotify track every 5 seconds
-            # ------------------------------------------------------------
             if now - last_track_time >= 5.0:
                 current_track = spotify.get_current_track()
                 last_track_time = now
 
-            # ------------------------------------------------------------
-            # OK hold progress for ring animation
-            # ------------------------------------------------------------
             wake_progress = 0.0
 
             if ok_detector.start_time is not None and not gesture_active:
@@ -405,46 +319,38 @@ def main():
                     (now - ok_detector.start_time) / ok_detector.hold_seconds,
                 )
 
-            # ------------------------------------------------------------
-            # Render original WaveBeat interface as hologram-style UI
-            # ------------------------------------------------------------
             display_gesture = (
                 executing_gesture
                 if state in ("executing", "error") and executing_gesture
                 else current_gesture
             )
 
-            track_display = (
+            # IMPORTANT:
+            # The NOW PLAYING box always shows the song.
+            # Volume is NOT sent to the NOW PLAYING box anymore.
+            track_display = current_track
+
+            # If volume action is active, show volume only in the centre message.
+            center_message = (
                 volume_display
                 if now < volume_display_until
-                else current_track
+                else message
             )
 
             display.draw(
                 frame,
                 state,
-                message,
+                center_message,
                 gesture=display_gesture,
                 track=track_display,
-                camera_on=display.show_camera,
+                camera_on=False,
                 wake_progress=wake_progress,
             )
 
-            # ------------------------------------------------------------
-            # Keyboard input
-            # ------------------------------------------------------------
             command = display.poll()
 
             if command == "quit":
                 break
-
-            if command == "toggle_body":
-                display.show_camera = not display.show_camera
-
-                print(
-                    f"[WaveBeat] Camera background "
-                    f"{'ON' if display.show_camera else 'OFF'}"
-                )
 
     finally:
         camera.release()
