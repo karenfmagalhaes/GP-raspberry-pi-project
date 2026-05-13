@@ -234,7 +234,7 @@ def main():
                             executing_gesture = detected_motion
                             action_until = now + 2.5
 
-                            # This appears ONLY under the big VOL+/VOL- action.
+                            # This appears under the big VOL+/VOL- action.
                             volume_display = result
                             volume_display_until = now + 2.5
 
