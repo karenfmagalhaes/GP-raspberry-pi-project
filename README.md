@@ -43,7 +43,18 @@ The aim of this project is to create a touch-free music controller using compute
 | One finger swipe left  | Previous track            |
 | Peace move up          | Volume up                 |
 | Peace move down        | Volume down               |
-| Rock gesture held      | Toggle camera background  |
+
+## Division of Work
+
+This project was developed as a team, with all members contributing to the code, testing, troubleshooting, and documentation.
+
+- **Sergio** worked on the main base code, including the initial project structure, main program logic, gesture recognition, gesture mappings, previous development work, and documentation.
+
+- **Aline** implemented and updated the code, tested the gesture controls, created the user interface, and helped connect the interface with the Spotify gesture actions.
+
+- **Karen** set up the Raspberry Pi environment, configured the camera, helped with the hologram-style assistant display, and created the physical box/case for the assistant prototype.
+
+All team members worked together on improving the code, testing the system, fixing issues, and completing the final documentation.
 
 ## Hardware Used
 
@@ -154,9 +165,9 @@ python main.py
 Controls inside the interface:
 
 ```text
-Q = quit
-H = toggle camera background
-G = gesture guide
+Q = Quit the program
+M = Mirror the screen for hologram mode
+G = Show or hide the gesture guide
 ```
 
 ## How It Works
@@ -213,13 +224,15 @@ G = gesture guide
 1. Start Spotify on an active device.
 2. Run `python main.py`.
 3. Show standby mode.
-4. Hold the OK sign to activate controls.
-5. Use open palm to play.
-6. Use fist to pause.
-7. Swipe right for next track.
-8. Swipe left for previous track.
-9. Move peace gesture up/down for volume.
-10. Hold rock gesture to toggle the camera background.
+4. Hold the OK sign to activate gesture controls.
+5. Use open palm to play the music.
+6. Use fist to pause the music.
+7. Swipe right with one finger to skip to the next track.
+8. Swipe left with one finger to return to the previous track.
+9. Move the peace gesture up to increase the volume.
+10. Move the peace gesture down to decrease the volume.
+11. Show the hologram-style interface feedback after each detected gesture.
+12. Press `Q` to quit the program.
 
 ## References
 
